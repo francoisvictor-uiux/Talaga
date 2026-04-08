@@ -6,6 +6,31 @@
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>Talaga</title>
       <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
+    <script>
+      // GitHub Pages SPA redirect: restore path from 404.html redirect
+      (function() {
+        var redirect = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+        if (redirect && redirect !== location.href) {
+          history.replaceState(null, null, redirect);
+        }
+        var search = location.search;
+        if (search) {
+          var p = new URLSearchParams(search);
+          var path = p.get('p');
+          if (path) {
+            var query = p.get('q');
+            history.replaceState(
+              null, null,
+              location.pathname.split('/').slice(0, 2).join('/') + '/' +
+              path.replace(/~and~/g, '&') +
+              (query ? '?' + query.replace(/~and~/g, '&') : '') +
+              location.hash
+            );
+          }
+        }
+      })();
+    </script>
     </head>
 
     <body>
