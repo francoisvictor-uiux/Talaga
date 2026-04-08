@@ -1,8 +1,6 @@
 
   # Talaga
 
-  This is a code bundle for Talaga. The original project is available at https://www.figma.com/design/m0nvqPu9Eec7m9Tr4GpaDg/Talaga.
-
   ## Running the code
 
   Run `npm i` to install the dependencies.
