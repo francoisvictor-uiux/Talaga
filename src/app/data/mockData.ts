@@ -29,12 +29,12 @@ export const chambers = [
 
 // ===== CUSTOMERS =====
 export const customers = [
-  { id: 1, code: "C001", name: "شركة النيل للتجارة والتوزيع", phone: "01012345678", balance: 15000, itemsStored: 120, agent: "أحمد محمد", address: "القاهرة - مدينة نصر", taxNumber: "123456789", notes: "" },
-  { id: 2, code: "C002", name: "مؤسسة رمسيس للمواد الغذائية", phone: "01156789012", balance: -3200, itemsStored: 85, agent: "سعيد العمري", address: "الإسكندرية - سيدي جابر", taxNumber: "234567891", notes: "عميل مميز" },
-  { id: 3, code: "C003", name: "مجموعة الدلتا للتوزيع", phone: "01232109876", balance: 28500, itemsStored: 230, agent: "محمد الشيمي", address: "الجيزة - حي الدقي", taxNumber: "345678912", notes: "" },
-  { id: 4, code: "C004", name: "شركة سيناء للمواد الغذائية", phone: "01009876543", balance: 5600, itemsStored: 45, agent: "خالد السيد", address: "بورسعيد - المنطقة الصناعية", taxNumber: "456789123", notes: "بيتأخر في الدفع أحياناً" },
-  { id: 5, code: "C005", name: "مؤسسة البحيرة للتجارة", phone: "01143216789", balance: 0, itemsStored: 180, agent: "عبدالله النجار", address: "المنصورة - حي الجامعة", taxNumber: "567891234", notes: "" },
-  { id: 6, code: "C006", name: "شركة الأهرام للمنتجات الزراعية", phone: "01212345678", balance: 42000, itemsStored: 310, agent: "فهد الحلواني", address: "الإسماعيلية - حي الضفة الغربية", taxNumber: "678912345", notes: "عميل VIP" },
+  { id: 1, code: "C001", name: "شركة النيل للتجارة والتوزيع", phone: "01012345678", balance: 15000, itemsStored: 120, agent: "أحمد محمد", address: "القاهرة - مدينة نصر", taxNumber: "123456789", defaultNaulage: 12, notes: "" },
+  { id: 2, code: "C002", name: "مؤسسة رمسيس للمواد الغذائية", phone: "01156789012", balance: -3200, itemsStored: 85, agent: "سعيد العمري", address: "الإسكندرية - سيدي جابر", taxNumber: "234567891", defaultNaulage: 8, notes: "عميل مميز" },
+  { id: 3, code: "C003", name: "مجموعة الدلتا للتوزيع", phone: "01232109876", balance: 28500, itemsStored: 230, agent: "محمد الشيمي", address: "الجيزة - حي الدقي", taxNumber: "345678912", defaultNaulage: 10, notes: "" },
+  { id: 4, code: "C004", name: "شركة سيناء للمواد الغذائية", phone: "01009876543", balance: 5600, itemsStored: 45, agent: "خالد السيد", address: "بورسعيد - المنطقة الصناعية", taxNumber: "456789123", defaultNaulage: 9, notes: "بيتأخر في الدفع أحياناً" },
+  { id: 5, code: "C005", name: "مؤسسة البحيرة للتجارة", phone: "01143216789", balance: 0, itemsStored: 180, agent: "عبدالله النجار", address: "المنصورة - حي الجامعة", taxNumber: "567891234", defaultNaulage: 7, notes: "" },
+  { id: 6, code: "C006", name: "شركة الأهرام للمنتجات الزراعية", phone: "01212345678", balance: 42000, itemsStored: 310, agent: "فهد الحلواني", address: "الإسماعيلية - حي الضفة الغربية", taxNumber: "678912345", defaultNaulage: 15, notes: "عميل VIP" },
 ];
 
 export const customerDrivers = [
@@ -48,6 +48,23 @@ export const customerPricing = [
   { id: 1, customerId: 1, itemName: "دجاج مجمد", pricePerDay: 2.5, pricePerMonth: 70 },
   { id: 2, customerId: 1, itemName: "لحم بقري", pricePerDay: 4.0, pricePerMonth: 110 },
   { id: 3, customerId: 2, itemName: "خضروات", pricePerDay: 1.5, pricePerMonth: 40 },
+];
+
+// ===== CUSTOMER ITEMS & NAULAGE (نولون رسوم التداول) =====
+export const customerItems = [
+  { id: 1,  customerId: 1, itemName: "دجاج مجمد",    naulage: 15 },
+  { id: 2,  customerId: 1, itemName: "لحم بقري",     naulage: 20 },
+  { id: 3,  customerId: 1, itemName: "أسماك",         naulage: 18 },
+  { id: 4,  customerId: 2, itemName: "خضروات مبردة", naulage: 8  },
+  { id: 5,  customerId: 2, itemName: "فواكه مبردة",  naulage: 10 },
+  { id: 6,  customerId: 3, itemName: "دجاج مجمد",    naulage: 12 },
+  { id: 7,  customerId: 3, itemName: "لحم بقري",     naulage: 18 },
+  { id: 8,  customerId: 3, itemName: "جبنة رومي",    naulage: 25 },
+  { id: 9,  customerId: 4, itemName: "معجنات مجمدة", naulage: 14 },
+  { id: 10, customerId: 5, itemName: "بطاطس",         naulage: 7  },
+  { id: 11, customerId: 6, itemName: "دجاج مجمد",    naulage: 13 },
+  { id: 12, customerId: 6, itemName: "زبيب",          naulage: 22 },
+  { id: 13, customerId: 6, itemName: "عسل طبيعي",    naulage: 30 },
 ];
 
 // ===== EMPLOYEES =====

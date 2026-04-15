@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Settings as SettingsIcon, Building2, Printer, Shield, Database, Palette, Save, Upload } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Printer, Shield, Database, Palette, Save, Upload, MessageCircle } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 const settingsTabs = [
   { id: "company", label: "بيانات الشركة", icon: Building2 },
+  { id: "notifications", label: "الإشعارات", icon: MessageCircle },
   { id: "printing", label: "إعدادات الطباعة", icon: Printer },
   { id: "security", label: "الأمان", icon: Shield },
   { id: "backup", label: "النسخ الاحتياطي", icon: Database },
@@ -28,6 +29,8 @@ export function Settings() {
   const [activeTab, setActiveTab] = useState("company");
   const [qrSize, setQrSize] = useState([80]);
   const [fontSize, setFontSize] = useState([14]);
+  const [waPhone, setWaPhone] = useState(() => localStorage.getItem("wa_notify_phone") || "");
+  const [waEnabled, setWaEnabled] = useState(() => localStorage.getItem("wa_notify_enabled") === "true");
 
   const handleSave = () => toast.success("تم حفظ الإعدادات بنجاح");
 
@@ -116,6 +119,39 @@ export function Settings() {
                     </div>
                   </div>
                   <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
+                    <Save className="w-4 h-4" />حفظ التغييرات
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
+
+          {activeTab === "notifications" && (
+            <motion.div key="notifications" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}>
+              <Card className="border-0 shadow-sm">
+                <CardContent className="p-5 space-y-4">
+                  <h3 className="font-semibold text-gray-800">إعدادات الإشعارات</h3>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between py-3 border-b">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">إشعارات الواتساب</p>
+                        <p className="text-xs text-gray-500 mt-0.5">إرسال إشعارات عبر الواتساب عند حدوث حدث مهم</p>
+                      </div>
+                      <Switch defaultChecked={waEnabled} onCheckedChange={setWaEnabled} />
+                    </div>
+                    <div className="flex items-center justify-between py-3 border-b">
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">رقم هاتف الواتساب</p>
+                        <p className="text-xs text-gray-500 mt-0.5">رقم الهاتف الذي سيتم إرسال الإشعارات إليه</p>
+                      </div>
+                      <Input defaultValue={waPhone} dir="rtl" onChange={e => setWaPhone(e.target.value)} />
+                    </div>
+                  </div>
+                  <Button onClick={() => {
+                    localStorage.setItem("wa_notify_enabled", waEnabled.toString());
+                    localStorage.setItem("wa_notify_phone", waPhone);
+                    handleSave();
+                  }} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
                     <Save className="w-4 h-4" />حفظ التغييرات
                   </Button>
                 </CardContent>

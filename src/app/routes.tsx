@@ -1,4 +1,4 @@
-import { createHashRouter, Navigate } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import { AppLayout } from "./components/layout/AppLayout";
 import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
@@ -13,7 +13,7 @@ import { TodoList } from "./pages/TodoList";
 import { AuditLog } from "./pages/AuditLog";
 import { Settings } from "./pages/Settings";
 
-export const router = createHashRouter([
+export const router = createBrowserRouter([
   {
     path: "/",
     element: <Navigate to="/login" replace />,

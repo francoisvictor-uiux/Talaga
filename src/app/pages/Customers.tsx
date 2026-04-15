@@ -9,7 +9,7 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
-import { customers, customerDrivers, customerPricing } from "../data/mockData";
+import { customers, customerDrivers, customerPricing, customerItems, items } from "../data/mockData";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
@@ -72,7 +72,7 @@ export function Customers() {
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">اسم العميل</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الهاتف</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الرصيد</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الأصناف المخزنة</th>
+                    <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الاصناف المخزنة</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">المندوب</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الإجراءات</th>
                   </tr>
@@ -153,6 +153,7 @@ export function Customers() {
               <Tabs defaultValue="basic" dir="rtl">
                 <TabsList dir="rtl" className="w-full bg-[#f3f4f6] rounded-xl p-1 h-auto mb-4">
                   <TabsTrigger value="basic" className="flex-1 text-xs rounded-xl data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">البيانات</TabsTrigger>
+                  <TabsTrigger value="naulage" className="flex-1 text-xs rounded-xl data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">النولون</TabsTrigger>
                   <TabsTrigger value="pricing" className="flex-1 text-xs rounded-xl data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">الأسعار</TabsTrigger>
                   <TabsTrigger value="drivers" className="flex-1 text-xs rounded-xl data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">السائقون</TabsTrigger>
                   <TabsTrigger value="statement" className="flex-1 text-xs rounded-xl data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">كشف الحساب</TabsTrigger>
@@ -182,12 +183,58 @@ export function Customers() {
                       <Label className="text-xs text-gray-500">المندوب</Label>
                       <p className="text-sm font-medium">{selectedCustomer.agent}</p>
                     </div>
+                    <div>
+                      <Label className="text-xs text-gray-500">النولون الافتراضي</Label>
+                      <p className="text-sm font-medium text-amber-700">{selectedCustomer.defaultNaulage} ج.م / طرد</p>
+                    </div>
                     {selectedCustomer.notes && (
                       <div className="col-span-2">
                         <Label className="text-xs text-gray-500">ملاحظات</Label>
                         <p className="text-sm text-gray-700 bg-gray-50 rounded p-2 mt-1">{selectedCustomer.notes}</p>
                       </div>
                     )}
+                  </div>
+                </TabsContent>
+
+                {/* Naulage Tab */}
+                <TabsContent value="naulage">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-gray-700">نولون رسوم التداول لكل صنف</p>
+                      <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                        <DollarSign className="w-3.5 h-3.5 text-amber-600" />
+                        <span className="text-xs text-amber-700">افتراضي: <strong>{selectedCustomer.defaultNaulage} ج.م/طرد</strong></span>
+                      </div>
+                    </div>
+                    {customerItems.filter(ci => ci.customerId === selectedCustomer.id).length > 0 ? (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-amber-50 rounded">
+                            <th className="text-right p-2 text-xs text-gray-500">الصنف</th>
+                            <th className="text-right p-2 text-xs text-gray-500">النولون (ج.م / طرد)</th>
+                            <th className="text-right p-2 text-xs text-gray-500">إجراء</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {customerItems.filter(ci => ci.customerId === selectedCustomer.id).map(ci => (
+                            <tr key={ci.id} className="border-b">
+                              <td className="p-2 font-medium">{ci.itemName}</td>
+                              <td className="p-2">
+                                <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">{ci.naulage} ج.م</span>
+                              </td>
+                              <td className="p-2">
+                                <button className="p-1 text-blue-600 hover:bg-blue-50 rounded"><Edit className="w-3.5 h-3.5" /></button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="text-sm text-gray-500 text-center py-6">لا توجد نولونات خاصة — يُطبق النولون الافتراضي</p>
+                    )}
+                    <button className="flex items-center gap-1.5 text-blue-600 hover:bg-blue-50 text-sm font-medium px-3 py-1.5 rounded-lg border border-dashed border-blue-300 w-full justify-center">
+                      <Plus className="w-3.5 h-3.5" />إضافة نولون لصنف جديد
+                    </button>
                   </div>
                 </TabsContent>
 
@@ -251,6 +298,10 @@ export function Customers() {
             <div className="space-y-1.5"><Label>المندوب</Label><Input placeholder="اسم المندوب" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
             <div className="col-span-2 space-y-1.5"><Label>العنوان</Label><Input placeholder="المحافظة - الحي" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
             <div className="space-y-1.5"><Label>الرقم الضريبي</Label><Input placeholder="XXXXXXXXX" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5"><DollarSign className="w-3.5 h-3.5 text-amber-600" />النولون الافتراضي (ج.م/طرد)</Label>
+              <Input type="number" placeholder="0" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+            </div>
             <div className="col-span-2 space-y-1.5"><Label>ملاحظات</Label><Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none border border-[#d1d5dc] bg-[#f9fafb]" rows={2} /></div>
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
