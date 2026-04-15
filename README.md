@@ -1,7 +1,7 @@
 
-  # Talaga (Copy)
+  # Talaga
 
-  This is a code bundle for Talaga (Copy). The original project is available at https://www.figma.com/design/j688ZwU60sFLZ67GYNvIbT/Talaga--Copy-.
+  This is a code bundle for Talaga. The original project is available at https://www.figma.com/design/j688ZwU60sFLZ67GYNvIbT/Talaga--Copy-.
 
   ## Running the code
 
