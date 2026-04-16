@@ -7,7 +7,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { customers, items, packages, warehouses } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { toast } from "sonner";
 
 interface IncomingRow {
@@ -26,6 +26,7 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 export function Incoming() {
+  const { customers, items, packages, warehouses } = useDb();
   const [rows, setRows] = useState<IncomingRow[]>([
     { id: 1, item: "", pkg: "", quantity: "", weight: "", productionDate: "", expiryDate: "", serial: "", chamber: "" }
   ]);

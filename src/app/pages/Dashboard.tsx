@@ -24,9 +24,9 @@ import {
 import {
   dailyMovement,
   warehouseOccupancy,
-  transactions,
   alerts,
 } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { cn } from "../components/ui/utils";
 
 const kpiCards = [
@@ -146,6 +146,7 @@ function CustomBarChart({
 }
 
 export function Dashboard() {
+  const { transactions } = useDb();
   return (
     <motion.div
       variants={container}

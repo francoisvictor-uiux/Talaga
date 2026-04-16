@@ -4,7 +4,7 @@ import { Shield, Search, ChevronDown } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { auditLogs } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
 import React from "react";
@@ -21,6 +21,7 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 export function AuditLog() {
+  const { auditLogs } = useDb();
   const [search, setSearch] = useState("");
   const [moduleFilter, setModuleFilter] = useState("الكل");
   const [expanded, setExpanded] = useState<number | null>(null);

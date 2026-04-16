@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Plus, Eye, Edit, Shield, List, LayoutGrid, Search, X } from "lucide-react";
+import { Plus, Eye, Edit, Shield, List, LayoutGrid, Search, X, Phone, Mail, DollarSign } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -10,12 +10,12 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs"
 import { Label } from "../components/ui/label";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { employees } from "../data/mockData";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
+import { useDb } from "../context/DbContext";
 
-type Employee = typeof employees[0];
+type Employee = ReturnType<typeof useDb>["employees"][0];
 
 const roleColors: Record<string, string> = {
   "مدير": "bg-purple-100 text-purple-700 border-purple-200",
@@ -30,16 +30,52 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 const cardItem = { hidden: { opacity: 0, scale: 0.95 }, show: { opacity: 1, scale: 1 } };
 
 export function Employees() {
+  const { employees, updateEmployee } = useDb();
   const [view, setView] = useState<"grid" | "list">("grid");
   const [showPerms, setShowPerms] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [showView, setShowView] = useState(false);
   const [selected, setSelected] = useState<Employee | null>(null);
+  const [viewTarget, setViewTarget] = useState<Employee | null>(null);
+  const [editTarget, setEditTarget] = useState<Employee | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", role: "", phone: "", email: "", salary: "" });
   const [search, setSearch] = useState("");
 
   const filtered = employees.filter(e =>
     e.name.includes(search) || e.role.includes(search) || e.phone.includes(search)
   );
   const pager = usePagination(filtered, 12);
+
+  const openEdit = (emp: Employee) => {
+    setEditTarget(emp);
+    setEditForm({
+      name: emp.name,
+      role: emp.role,
+      phone: emp.phone,
+      email: emp.email,
+      salary: String(emp.salary),
+    });
+    setShowEdit(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editTarget) return;
+    if (!editForm.name || !editForm.role) {
+      toast.error("يرجى تعبئة الحقول الإلزامية");
+      return;
+    }
+    updateEmployee(editTarget.id, {
+      name: editForm.name,
+      role: editForm.role,
+      phone: editForm.phone,
+      email: editForm.email,
+      salary: Number(editForm.salary) || 0,
+    });
+    toast.success(`تم تحديث بيانات "${editForm.name}" بنجاح`);
+    setShowEdit(false);
+    setEditTarget(null);
+  };
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
@@ -117,10 +153,16 @@ export function Employees() {
                               <p className="text-green-600 font-medium">{emp.salary.toLocaleString()} ج.م</p>
                             </div>
                             <div className="flex items-center justify-center gap-1 mt-4">
-                              <button className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors">
+                              <button
+                                className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors"
+                                onClick={() => { setViewTarget(emp); setShowView(true); }}
+                              >
                                 <Eye className="w-3.5 h-3.5" />عرض
                               </button>
-                              <button className="flex items-center gap-1 text-xs text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors">
+                              <button
+                                className="flex items-center gap-1 text-xs text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors"
+                                onClick={() => openEdit(emp)}
+                              >
                                 <Edit className="w-3.5 h-3.5" />تعديل
                               </button>
                               <button
@@ -176,8 +218,13 @@ export function Employees() {
                         </td>
                         <td className="px-4 py-3.5">
                           <div className="flex gap-1">
-                            <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"><Eye className="w-3.5 h-3.5" /></button>
-                            <button className="p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"><Edit className="w-3.5 h-3.5" /></button>
+                            <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" onClick={() => { setViewTarget(emp); setShowView(true); }}><Eye className="w-3.5 h-3.5" /></button>
+                            <button
+                              className="p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                              onClick={() => openEdit(emp)}
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
                             <button className="p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors" onClick={() => { setSelected(emp); setShowPerms(true); }}><Shield className="w-3.5 h-3.5" /></button>
                           </div>
                         </td>
@@ -211,6 +258,59 @@ export function Employees() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* View Employee Dialog */}
+      <Dialog open={showView} onOpenChange={setShowView}>
+        <DialogContent dir="rtl" className="max-w-md bg-white p-0 overflow-hidden">
+          {viewTarget && (
+            <>
+              {/* Hero */}
+              <div className="bg-gradient-to-br from-blue-500 to-blue-700 px-6 py-8 text-center relative">
+                <div className="w-20 h-20 rounded-full bg-white/20 border-4 border-white/40 flex items-center justify-center text-white text-3xl font-bold mx-auto mb-3">
+                  {viewTarget.name.charAt(0)}
+                </div>
+                <h2 className="text-white font-bold text-lg leading-tight">{viewTarget.name}</h2>
+                <div className="flex items-center justify-center gap-2 mt-2 flex-wrap">
+                  <Badge className={cn("text-xs border", roleColors[viewTarget.role] ?? "bg-gray-100 text-gray-700")}>{viewTarget.role}</Badge>
+                  <span className={cn("text-xs px-2 py-0.5 rounded-full", viewTarget.status === "active" ? "bg-green-500/80 text-white" : "bg-gray-400/80 text-white")}>
+                    {viewTarget.status === "active" ? "نشط" : "غير نشط"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Info */}
+              <div className="p-5 space-y-3">
+                {[
+                  { label: "رقم الهاتف", value: viewTarget.phone || "—", icon: Phone },
+                  { label: "البريد الإلكتروني", value: viewTarget.email || "—", icon: Mail },
+                  { label: "الراتب", value: `${viewTarget.salary.toLocaleString()} ج.م`, icon: DollarSign },
+                ].map(row => (
+                  <div key={row.label} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+                    <span className="text-xs text-gray-400 flex items-center gap-1.5"><row.icon className="w-3.5 h-3.5 text-gray-400" />{row.label}</span>
+                    <span className="text-sm font-semibold text-gray-800">{row.value}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="px-5 pb-5 flex gap-2">
+                <Button
+                  className="flex-1 bg-[#155dfc] hover:bg-blue-700 text-white gap-1.5"
+                  onClick={() => { setShowView(false); openEdit(viewTarget); }}
+                >
+                  <Edit className="w-3.5 h-3.5" />تعديل البيانات
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 border-purple-300 text-purple-600 hover:bg-purple-50 gap-1.5"
+                  onClick={() => { setShowView(false); setSelected(viewTarget); setShowPerms(true); }}
+                >
+                  <Shield className="w-3.5 h-3.5" />الصلاحيات
+                </Button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Permissions Dialog */}
       <Dialog open={showPerms} onOpenChange={setShowPerms}>
@@ -254,15 +354,25 @@ export function Employees() {
         <DialogContent dir="rtl" className="max-w-lg bg-white">
           <DialogHeader><DialogTitle>إضافة موظف جديد</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2 space-y-1.5"><Label>الاسم الكامل</Label><Input dir="rtl" placeholder="الاسم الكامل للموظف" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
+            <div className="col-span-2 space-y-1.5"><Label>الاسم الكامل <span className="text-red-500">*</span></Label><Input dir="rtl" placeholder="الاسم الكامل للموظف" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
             <div className="space-y-1.5">
-              <Label>الدور الوظيفي</Label>
+              <Label>الدور الوظيفي <span className="text-red-500">*</span></Label>
               <Select>
                 <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
                 <SelectContent dir="rtl">
                   <SelectItem value="مدير">مدير</SelectItem>
                   <SelectItem value="محاسب">محاسب</SelectItem>
                   <SelectItem value="عامل مخزن">عامل مخزن</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>حالة الموظف</Label>
+              <Select defaultValue="active">
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue /></SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="active">نشط</SelectItem>
+                  <SelectItem value="inactive">غير نشط</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -273,6 +383,74 @@ export function Employees() {
           <DialogFooter className="gap-2 justify-end mt-2">
             <Button onClick={() => { toast.success("تم إضافة الموظف بنجاح"); setShowAdd(false); }} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ</Button>
             <Button variant="outline" onClick={() => setShowAdd(false)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Employee Dialog */}
+      <Dialog open={showEdit} onOpenChange={setShowEdit}>
+        <DialogContent dir="rtl" className="max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle>تعديل بيانات الموظف</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="col-span-2 space-y-1.5">
+              <Label>الاسم الكامل <span className="text-red-500">*</span></Label>
+              <Input
+                dir="rtl"
+                placeholder="الاسم الكامل للموظف"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={editForm.name}
+                onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>الدور الوظيفي <span className="text-red-500">*</span></Label>
+              <Select value={editForm.role} onValueChange={v => setEditForm({ ...editForm, role: v })}>
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="مدير">مدير</SelectItem>
+                  <SelectItem value="محاسب">محاسب</SelectItem>
+                  <SelectItem value="عامل مخزن">عامل مخزن</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>رقم الهاتف</Label>
+              <Input
+                dir="rtl"
+                placeholder="01XXXXXXXXX"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={editForm.phone}
+                onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>البريد الإلكتروني</Label>
+              <Input
+                dir="rtl"
+                type="email"
+                placeholder="example@coldstorage.eg"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={editForm.email}
+                onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>الراتب (ج.م)</Label>
+              <Input
+                dir="rtl"
+                type="number"
+                placeholder="0"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={editForm.salary}
+                onChange={e => setEditForm({ ...editForm, salary: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveEdit} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ التعديلات</Button>
+            <Button variant="outline" onClick={() => setShowEdit(false)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

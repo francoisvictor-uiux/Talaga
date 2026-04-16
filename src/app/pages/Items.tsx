@@ -11,15 +11,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { items, packages } from "../data/mockData";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { useConfirmDelete } from "../components/ui/ConfirmDialog";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
+import { useDb } from "../context/DbContext";
+import { useTheme } from "../context/ThemeContext";
 
 /* ─── types ─── */
-type Item = typeof items[0];
-type Pkg  = typeof packages[0];
+type Item = ReturnType<typeof useDb>["items"][0];
+type Pkg  = ReturnType<typeof useDb>["packages"][0];
 
 /* ─── storage config ─── */
 const storageConfig: Record<string, { badge: string; icon: React.ElementType; grad: string }> = {
@@ -80,7 +81,7 @@ function ImageUploader({ value, onChange, label }: { value: string; onChange: (v
 /* ══════════════════════════════════════════════════════════
    ItemCard
 ══════════════════════════════════════════════════════════ */
-function ItemCard({ it, onDelete }: { it: Item; onDelete: (it: Item) => void }) {
+function ItemCard({ it, onDelete, onEdit }: { it: Item; onDelete: (it: Item) => void; onEdit: (it: Item) => void }) {
   const cfg = storageConfig[it.storageType] ?? storageConfig["تبريد"];
   const Icon = cfg.icon;
   const alertDay = it.maxDays - it.alertDays;
@@ -122,7 +123,10 @@ function ItemCard({ it, onDelete }: { it: Item; onDelete: (it: Item) => void }) 
             </div>
           </div>
           <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t">
-            <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" onClick={() => toast.info("تعديل الصنف")}>
+            <button
+              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+              onClick={() => onEdit(it)}
+            >
               <Edit className="w-3.5 h-3.5" />
             </button>
             <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => onDelete(it)}>
@@ -138,7 +142,7 @@ function ItemCard({ it, onDelete }: { it: Item; onDelete: (it: Item) => void }) 
 /* ══════════════════════════════════════════════════════════
    PackageCard
 ══════════════════════════════════════════════════════════ */
-function PackageCard({ pkg, onDelete }: { pkg: Pkg; onDelete: (pkg: Pkg) => void }) {
+function PackageCard({ pkg, onDelete, onEdit }: { pkg: Pkg; onDelete: (pkg: Pkg) => void; onEdit: (pkg: Pkg) => void }) {
   const grad = pkgGrads[pkg.type] ?? "from-gray-400 to-gray-600";
   return (
     <motion.div variants={anim} className="h-full">
@@ -173,7 +177,10 @@ function PackageCard({ pkg, onDelete }: { pkg: Pkg; onDelete: (pkg: Pkg) => void
             </div>
           </div>
           <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t">
-            <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+            <button
+              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+              onClick={() => onEdit(pkg)}
+            >
               <Edit className="w-3.5 h-3.5" />
             </button>
             <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => onDelete(pkg)}>
@@ -214,12 +221,22 @@ function ViewToggle({ view, setView }: { view: "grid" | "list"; setView: (v: "gr
    Main Component
 ══════════════════════════════════════════════════════════ */
 export function Items() {
+  const { items, packages, addItem, deleteItem, updateItem, addPackage, deletePackage, updatePackage } = useDb();
+  const { theme } = useTheme();
   const [itemView, setItemView] = useState<"grid" | "list">("grid");
   const [pkgView,  setPkgView]  = useState<"grid" | "list">("grid");
   const [itemSearch, setItemSearch] = useState("");
   const [pkgSearch,  setPkgSearch]  = useState("");
   const [showAddItem, setShowAddItem] = useState(false);
   const [showAddPkg,  setShowAddPkg]  = useState(false);
+
+  /* Edit state — Items */
+  const [editItem, setEditItem] = useState<Item | null>(null);
+  const [editItemForm, setEditItemForm] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
+
+  /* Edit state — Packages */
+  const [editPkg, setEditPkg] = useState<Pkg | null>(null);
+  const [editPkgForm, setEditPkgForm] = useState({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
 
   const [newItem, setNewItem] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
   const [newPkg,  setNewPkg]  = useState({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
@@ -239,15 +256,97 @@ export function Items() {
   const itemsPager = usePagination(filteredItems, 8);
   const pkgsPager  = usePagination(filteredPkgs, 8);
 
+  /* Open edit — Item */
+  const openEditItem = (it: Item) => {
+    setEditItem(it);
+    setEditItemForm({
+      prefix: it.prefix,
+      code: it.code,
+      name: it.name,
+      storageType: it.storageType,
+      maxDays: String(it.maxDays),
+      alertDays: String(it.alertDays),
+      image: it.image ?? "",
+    });
+  };
+
+  /* Open edit — Package */
+  const openEditPkg = (pkg: Pkg) => {
+    setEditPkg(pkg);
+    setEditPkgForm({
+      code: pkg.code,
+      type: pkg.type,
+      weight: String(pkg.weight),
+      length: String(pkg.length),
+      width: String(pkg.width),
+      height: String(pkg.height),
+      image: pkg.image ?? "",
+    });
+  };
+
+  /* Save edit — Item */
+  const handleSaveEditItem = () => {
+    if (!editItem) return;
+    if (!editItemForm.name || !editItemForm.storageType) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
+    updateItem(editItem.id, {
+      prefix: editItemForm.prefix,
+      code: editItemForm.code,
+      name: editItemForm.name,
+      storageType: editItemForm.storageType,
+      maxDays: Number(editItemForm.maxDays) || 30,
+      alertDays: Number(editItemForm.alertDays) || 3,
+      image: editItemForm.image,
+    });
+    toast.success(`تم تحديث الصنف "${editItemForm.name}" بنجاح`);
+    setEditItem(null);
+  };
+
+  /* Save edit — Package */
+  const handleSaveEditPkg = () => {
+    if (!editPkg) return;
+    if (!editPkgForm.type) { toast.error("يرجى اختيار نوع العبوة"); return; }
+    updatePackage(editPkg.id, {
+      code: editPkgForm.code,
+      type: editPkgForm.type,
+      weight: Number(editPkgForm.weight) || 0,
+      length: Number(editPkgForm.length) || 0,
+      width: Number(editPkgForm.width) || 0,
+      height: Number(editPkgForm.height) || 0,
+      image: editPkgForm.image,
+    });
+    toast.success(`تم تحديث العبوة "${editPkgForm.type}" بنجاح`);
+    setEditPkg(null);
+  };
+
   /* Handlers */
   const handleSaveItem = () => {
     if (!newItem.name || !newItem.storageType) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
+    addItem({
+      prefix: newItem.prefix,
+      code: newItem.code || `${newItem.prefix}-${String(items.length + 1).padStart(3, "0")}`,
+      name: newItem.name,
+      storageType: newItem.storageType,
+      maxDays: Number(newItem.maxDays) || 30,
+      alertDays: Number(newItem.alertDays) || 3,
+      status: "active",
+      image: newItem.image,
+    });
     toast.success(`تم إضافة الصنف "${newItem.name}" بنجاح`);
     setShowAddItem(false);
     setNewItem({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
   };
   const handleSavePkg = () => {
     if (!newPkg.type) { toast.error("يرجى اختيار نوع العبوة"); return; }
+    addPackage({
+      code: newPkg.code || `P${String(packages.length + 1).padStart(3, "0")}`,
+      type: newPkg.type,
+      weight: Number(newPkg.weight) || 0,
+      length: Number(newPkg.length) || 0,
+      width: Number(newPkg.width) || 0,
+      height: Number(newPkg.height) || 0,
+      status: "active",
+      image: newPkg.image,
+    });
     toast.success(`تم إضافة العبوة "${newPkg.type}" بنجاح`);
     setShowAddPkg(false);
     setNewPkg({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
@@ -311,7 +410,12 @@ export function Items() {
                   ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                       {itemsPager.paginated.map(it => (
-                        <ItemCard key={it.id} it={it} onDelete={it => confirmDelete(it.name, () => toast.success(`تم حذف "${it.name}"`))} />
+                        <ItemCard
+                          key={it.id}
+                          it={it}
+                          onEdit={openEditItem}
+                          onDelete={it => confirmDelete(it.name, () => { deleteItem(it.id); toast.success(`تم حذف "${it.name}"`); })}
+                        />
                       ))}
                     </div>
                   )}
@@ -392,8 +496,13 @@ export function Items() {
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-1">
-                                  <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" onClick={() => toast.info("تعديل الصنف")}><Edit className="w-3.5 h-3.5" /></button>
-                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(it.name, () => toast.success(`تم حذف "${it.name}"`))}><Trash2 className="w-3.5 h-3.5" /></button>
+                                  <button
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                                    onClick={() => openEditItem(it)}
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(it.name, () => { deleteItem(it.id); toast.success(`تم حذف "${it.name}"`); })}><Trash2 className="w-3.5 h-3.5" /></button>
                                 </div>
                               </td>
                             </motion.tr>
@@ -455,7 +564,12 @@ export function Items() {
                   ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                       {pkgsPager.paginated.map(pkg => (
-                        <PackageCard key={pkg.id} pkg={pkg} onDelete={pkg => confirmDelete(pkg.type, () => toast.success(`تم حذف عبوة "${pkg.type}"`))} />
+                        <PackageCard
+                          key={pkg.id}
+                          pkg={pkg}
+                          onEdit={openEditPkg}
+                          onDelete={pkg => confirmDelete(pkg.type, () => { deletePackage(pkg.id); toast.success(`تم حذف عبوة "${pkg.type}"`); })}
+                        />
                       ))}
                     </div>
                   )}
@@ -511,8 +625,13 @@ export function Items() {
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-1">
-                                  <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"><Edit className="w-3.5 h-3.5" /></button>
-                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(pkg.type, () => toast.success(`تم حذف عبوة "${pkg.type}"`))}><Trash2 className="w-3.5 h-3.5" /></button>
+                                  <button
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                                    onClick={() => openEditPkg(pkg)}
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(pkg.type, () => { deletePackage(pkg.id); toast.success(`تم حذف عبوة "${pkg.type}"`); })}><Trash2 className="w-3.5 h-3.5" /></button>
                                 </div>
                               </td>
                             </tr>
@@ -597,6 +716,71 @@ export function Items() {
         </DialogContent>
       </Dialog>
 
+      {/* ══════════════════ EDIT ITEM DIALOG ══════════════════ */}
+      <Dialog open={!!editItem} onOpenChange={() => setEditItem(null)}>
+        <DialogContent dir="rtl" className="max-w-lg bg-white">
+          <DialogHeader><DialogTitle>تعديل الصنف: {editItem?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-1">
+            <ImageUploader label="صورة الصنف" value={editItemForm.image} onChange={v => setEditItemForm({ ...editItemForm, image: v })} />
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label>حرف الكود</Label>
+                <Input value={editItemForm.prefix}
+                  onChange={e => setEditItemForm({ ...editItemForm, prefix: e.target.value })}
+                  dir="rtl" maxLength={3} className="border border-[#d1d5dc] bg-[#f9fafb] text-center" />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label>كود الصنف</Label>
+                <Input value={editItemForm.code}
+                  onChange={e => setEditItemForm({ ...editItemForm, code: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] font-mono" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>اسم الصنف <span className="text-red-500">*</span></Label>
+              <Input value={editItemForm.name}
+                onChange={e => setEditItemForm({ ...editItemForm, name: e.target.value })}
+                dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>احتياج التخزين <span className="text-red-500">*</span></Label>
+              <Select value={editItemForm.storageType} onValueChange={v => setEditItemForm({ ...editItemForm, storageType: v })}>
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue /></SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="تبريد"><div className="flex items-center gap-2"><Thermometer className="w-3.5 h-3.5 text-cyan-600" />تبريد</div></SelectItem>
+                  <SelectItem value="تجميد"><div className="flex items-center gap-2"><Snowflake className="w-3.5 h-3.5 text-blue-600" />تجميد</div></SelectItem>
+                  <SelectItem value="تنشير"><div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5 text-amber-600" />تنشير</div></SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>فترة التخزين (يوم)</Label>
+                <Input type="number" value={editItemForm.maxDays}
+                  onChange={e => setEditItemForm({ ...editItemForm, maxDays: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Bell className="w-3 h-3 text-orange-500" />تنبيه بعد (يوم)</Label>
+                <Input type="number" value={editItemForm.alertDays}
+                  onChange={e => setEditItemForm({ ...editItemForm, alertDays: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+            </div>
+            {editItemForm.maxDays && editItemForm.alertDays && (
+              <p className="text-xs text-orange-600 flex items-center gap-1 bg-orange-50 px-3 py-2 rounded-lg">
+                <Bell className="w-3 h-3 flex-shrink-0" />
+                سيتم إرسال تنبيه بعد <strong>{Number(editItemForm.maxDays) - Number(editItemForm.alertDays)}</strong> يوم من تاريخ الإيداع
+              </p>
+            )}
+          </div>
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveEditItem} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ التعديلات</Button>
+            <Button variant="outline" onClick={() => setEditItem(null)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ══════════════════ ADD PACKAGE DIALOG ══════════════════ */}
       <Dialog open={showAddPkg} onOpenChange={setShowAddPkg}>
         <DialogContent dir="rtl" className="max-w-lg bg-white">
@@ -641,16 +825,66 @@ export function Items() {
                   </div>
                 ))}
               </div>
-              {newPkg.length && newPkg.width && newPkg.height && (
-                <p className="text-xs text-gray-500 text-center font-mono">
-                  {newPkg.length} × {newPkg.width} × {newPkg.height} سم
-                </p>
-              )}
             </div>
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
             <Button onClick={handleSavePkg} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ</Button>
             <Button variant="outline" onClick={() => setShowAddPkg(false)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════ EDIT PACKAGE DIALOG ══════════════════ */}
+      <Dialog open={!!editPkg} onOpenChange={() => setEditPkg(null)}>
+        <DialogContent dir="rtl" className="max-w-lg bg-white">
+          <DialogHeader><DialogTitle>تعديل العبوة: {editPkg?.type}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-1">
+            <ImageUploader label="صورة العبوة" value={editPkgForm.image} onChange={v => setEditPkgForm({ ...editPkgForm, image: v })} />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>كود العبوة</Label>
+                <Input value={editPkgForm.code}
+                  onChange={e => setEditPkgForm({ ...editPkgForm, code: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] font-mono" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>نوع العبوة <span className="text-red-500">*</span></Label>
+                <Select value={editPkgForm.type} onValueChange={v => setEditPkgForm({ ...editPkgForm, type: v })}>
+                  <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {["طرد", "شوال", "كرتونة", "صندوق", "برميل"].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>الوزن (كجم)</Label>
+              <Input type="number" value={editPkgForm.weight}
+                onChange={e => setEditPkgForm({ ...editPkgForm, weight: e.target.value })}
+                dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>الأبعاد (سم)</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: "الطول", key: "length" },
+                  { label: "العرض", key: "width" },
+                  { label: "الارتفاع", key: "height" },
+                ].map(({ label, key }) => (
+                  <div key={key} className="space-y-1">
+                    <span className="text-xs text-gray-500 block text-center">{label}</span>
+                    <Input type="number"
+                      value={editPkgForm[key as keyof typeof editPkgForm]}
+                      onChange={e => setEditPkgForm({ ...editPkgForm, [key]: e.target.value })}
+                      dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] text-center" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveEditPkg} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ التعديلات</Button>
+            <Button variant="outline" onClick={() => setEditPkg(null)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

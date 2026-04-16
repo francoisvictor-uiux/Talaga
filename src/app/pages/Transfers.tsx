@@ -8,13 +8,14 @@ import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { customers, items, packages, warehouses } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { toast } from "sonner";
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.08 } } };
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 export function Transfers() {
+  const { customers, items, packages, warehouses } = useDb();
   const [tab, setTab] = useState("warehouses");
 
   const handleSave = (type: string) => {

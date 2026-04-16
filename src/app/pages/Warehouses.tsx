@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Plus,
   Edit,
+  Trash2,
   QrCode,
   ChevronDown,
   ChevronUp,
@@ -11,9 +12,15 @@ import {
   Settings2,
   MapPin,
   Zap,
+  LayoutGrid,
+  List,
+  Search,
+  X,
+  Eye,
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
+import { SearchToggle } from "../components/widgets/SearchToggle";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
 import {
@@ -39,7 +46,8 @@ import {
   TabsList,
   TabsTrigger,
 } from "../components/ui/tabs";
-import { warehouses, chambers } from "../data/mockData";
+import { useDb } from "../context/DbContext";
+import { useConfirmDelete } from "../components/ui/ConfirmDialog";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
 
@@ -104,6 +112,8 @@ const defaultCH = {
 };
 
 export function Warehouses() {
+  const { warehouses, chambers, updateWarehouse, deleteWarehouse, deleteChamber } = useDb();
+  const { confirmDelete, dialog: confirmDialog } = useConfirmDelete();
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showAddWH, setShowAddWH] = useState(false);
   const [showAddCH, setShowAddCH] = useState<number | null>(
@@ -111,6 +121,56 @@ export function Warehouses() {
   );
   const [newWH, setNewWH] = useState({ ...defaultWH });
   const [newCH, setNewCH] = useState({ ...defaultCH });
+  const [view, setView] = useState<"grid" | "list">("list");
+  const [search, setSearch] = useState("");
+
+  /* ── Edit Warehouse State ── */
+  type WHRow = (typeof warehouses)[number];
+  const [editWH, setEditWH] = useState(null as WHRow | null);
+  const [editWHForm, setEditWHForm] = useState({ ...defaultWH });
+
+  const openEditWH = (wh: WHRow) => {
+    setEditWH(wh);
+    setEditWHForm({
+      letter: wh.letter,
+      name: wh.name,
+      storageType: wh.storageType,
+      operationStatus: wh.machineStatus,
+      length: String(wh.length ?? ""),
+      width: String(wh.width ?? ""),
+      height: String(wh.height ?? ""),
+      capacityWeight: String(wh.totalCapacity ?? ""),
+      capacityBox: String(wh.capacityBox ?? ""),
+      capacitySack: String(wh.capacitySack ?? ""),
+      capacityCarton: String(wh.capacityCarton ?? ""),
+      machineType: wh.machineType ?? "",
+      machinePower: String(wh.machinePower ?? ""),
+      dailyRent: String(wh.dailyRent ?? ""),
+      monthlyRent: String(wh.monthlyRent ?? ""),
+      notes: wh.notes ?? "",
+    });
+  };
+
+  const handleSaveEditWH = () => {
+    if (!editWH) return;
+    if (!editWHForm.letter || !editWHForm.name) {
+      toast.error("يرجى إدخال حرف الثلاجة والاسم");
+      return;
+    }
+    updateWarehouse(editWH.id, {
+      letter: editWHForm.letter,
+      name: editWHForm.name,
+      storageType: editWHForm.storageType,
+      machineStatus: editWHForm.operationStatus,
+      machineType: editWHForm.machineType,
+      machinePower: Number(editWHForm.machinePower) || 0,
+      dailyRent: Number(editWHForm.dailyRent) || 0,
+      monthlyRent: Number(editWHForm.monthlyRent) || 0,
+      notes: editWHForm.notes,
+    });
+    toast.success(`تم تحديث بيانات ثلاجة "${editWHForm.name}" بنجاح`);
+    setEditWH(null);
+  };
 
   const toggleExpand = (id: number) =>
     setExpanded(expanded === id ? null : id);
@@ -130,17 +190,23 @@ export function Warehouses() {
     setNewCH({ ...defaultCH });
   };
 
-  const totalActive = warehouses.filter(
+  const filtered = warehouses.filter(w =>
+    w.name.includes(search) ||
+    w.letter.includes(search) ||
+    w.machineType.includes(search)
+  );
+
+  const totalActive = filtered.filter(
     (w) => w.machineStatus === "تشغيل",
   ).length;
-  const totalMaintenance = warehouses.filter(
+  const totalMaintenance = filtered.filter(
     (w) => w.machineStatus === "صيانة",
   ).length;
-  const totalCapacity = warehouses.reduce(
+  const totalCapacity = filtered.reduce(
     (s, w) => s + w.totalCapacity,
     0,
   );
-  const totalOccupied = warehouses.reduce(
+  const totalOccupied = filtered.reduce(
     (s, w) => s + w.occupied,
     0,
   );
@@ -169,13 +235,22 @@ export function Warehouses() {
             {overallPct}%
           </p>
         </div>
-        <Button
-          onClick={() => setShowAddWH(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          إضافة ثلاجة
-        </Button>
+        <div className="flex items-center gap-2">
+          <SearchToggle
+            view={view}
+            setView={setView}
+            search={search}
+            setSearch={setSearch}
+            placeholder="بحث باسم الثلاجة أو الحرف أو نوع الماكينة..."
+          />
+          <Button
+            onClick={() => setShowAddWH(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            إضافة ثلاجة
+          </Button>
+        </div>
       </motion.div>
 
       {/* ── Summary Cards ───────────────────────────────────────────── */}
@@ -222,32 +297,103 @@ export function Warehouses() {
         ))}
       </motion.div>
 
-      {/* ── Main Table ──────────────────────────────────────────────── */}
+      {/* ── Main Content ──────────────────────────────────────────────── */}
       <motion.div variants={row}>
-        <Card className="border-0 shadow-sm overflow-hidden">
-          {/* Table header */}
-          <div className="bg-gray-50 border-b px-4 py-2.5 overflow-x-auto">
-            <div
-              className="grid text-xs font-semibold text-gray-500 gap-2 min-w-[860px]"
-              style={{
-                gridTemplateColumns:
-                  "2.4fr 0.7fr 0.9fr 2fr 1.6fr 1.6fr 0.9fr 88px",
-              }}
-            >
-              <span>الثلاجة</span>
-              <span>العنابر</span>
-              <span>نوع التخزين</span>
-              <span>نسبة الإشغال</span>
-              <span>الماكينة</span>
-              <span>الإيجار يومي / شهري</span>
-              <span>حالة التشغيل</span>
-              <span></span>
+        {view === "grid" ? (
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4">
+              {filtered.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">
+                  <Search className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p>لا توجد نتائج</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {filtered.map((wh) => (
+                    <motion.div key={wh.id} variants={anim}>
+                      <Card className="border-0 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
+                        <CardContent className="p-5">
+                          <div className="text-center mb-4">
+                            <div className="relative inline-block">
+                              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-blue-700 flex items-center justify-center text-white text-xl font-bold mx-auto">
+                                {wh.letter}
+                              </div>
+                              <div className={cn("absolute bottom-0 left-0 w-4 h-4 rounded-full border-2 border-white", wh.machineStatus === "تشغيل" ? "bg-green-500" : "bg-gray-400")} />
+                            </div>
+                            <h3 className="font-semibold text-gray-800 mt-3 text-sm leading-snug">{wh.name}</h3>
+                            <Badge className={cn("text-xs border mt-1", opStatusColors[wh.machineStatus])}>{wh.machineStatus}</Badge>
+                          </div>
+                          <div className="space-y-1.5 text-xs text-gray-500 border-t pt-3">
+                            <p>{wh.storageType}</p>
+                            <p>{wh.machineType}</p>
+                            <p className="text-green-600 font-medium">{wh.dailyRent} ج.م/يوم</p>
+                          </div>
+                          <div className="flex items-center justify-center gap-1 mt-4">
+                            <button className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors">
+                              <Eye className="w-3.5 h-3.5" />عرض
+                            </button>
+                            <button
+                              className="flex items-center gap-1 text-xs text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors"
+                              onClick={() => openEditWH(wh)}
+                            >
+                              <Edit className="w-3.5 h-3.5" />تعديل
+                            </button>
+                            <button
+                              className="flex items-center gap-1 text-xs text-purple-600 hover:bg-purple-50 px-2 py-1 rounded transition-colors"
+                              onClick={() => { toggleExpand(wh.id); }}
+                            >
+                              {wh.chambers > 0 ? (
+                                <MapPin className="w-3.5 h-3.5" />
+                              ) : (
+                                <Plus className="w-3.5 h-3.5" />
+                              )}
+                              عنابر ({wh.chambers})
+                            </button>
+                            <button
+                              className="flex items-center gap-1 text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+                              onClick={() =>
+                                confirmDelete(wh.name, () => {
+                                  deleteWarehouse(wh.id);
+                                  toast.success(`تم حذف ثلاجة "${wh.name}" بنجاح`);
+                                }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
+                              }
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />حذف
+                            </button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-0 shadow-sm overflow-hidden">
+            {/* Table header */}
+            <div className="bg-gray-50 border-b px-4 py-2.5">
+              <div
+                className="grid text-xs font-semibold text-gray-500 gap-2"
+                style={{
+                  gridTemplateColumns:
+                    "2.4fr 0.7fr 0.9fr 2fr 1.4fr 1.4fr 0.9fr 100px",
+                }}
+              >
+                <span>الثلاجة</span>
+                <span>العنابر</span>
+                <span>نوع التخزين</span>
+                <span>نسبة الإشغال</span>
+                <span>الماكينة</span>
+                <span>الإيجار يومي / شهري</span>
+                <span>حالة التشغيل</span>
+                <span></span>
+              </div>
             </div>
-          </div>
 
-          {/* Rows */}
-          <div className="divide-y divide-gray-100">
-            {warehouses.map((wh, idx) => {
+            {/* Rows */}
+            <div className="divide-y divide-gray-100">
+              {filtered.map((wh, idx) => {
               const pct = Math.round(
                 (wh.occupied / wh.totalCapacity) * 100,
               );
@@ -269,12 +415,12 @@ export function Warehouses() {
                   )}
                 >
                   {/* Main row */}
-                  <div className="overflow-x-auto">
+                  <div>
                     <div
-                      className="grid items-center px-4 py-3 gap-2 min-w-[860px] hover:bg-blue-50/25 transition-colors"
+                      className="grid items-center px-4 py-3 gap-2 hover:bg-blue-50/25 transition-colors"
                       style={{
                         gridTemplateColumns:
-                          "2.4fr 0.7fr 0.9fr 2fr 1.6fr 1.6fr 0.9fr 88px",
+                          "2.4fr 0.7fr 0.9fr 2fr 1.4fr 1.4fr 0.9fr 100px",
                       }}
                     >
                       {/* Name + letter */}
@@ -392,6 +538,7 @@ export function Warehouses() {
                         <button
                           className="p-1.5 rounded hover:bg-blue-50 text-blue-600 transition-colors"
                           title="تعديل"
+                          onClick={() => openEditWH(wh)}
                         >
                           <Edit className="w-3.5 h-3.5" />
                         </button>
@@ -411,6 +558,19 @@ export function Warehouses() {
                           title="QR"
                         >
                           <QrCode className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"
+                          title="حذف الثلاجة"
+                          onClick={() =>
+                            confirmDelete(wh.name, () => {
+                              deleteWarehouse(wh.id);
+                              if (expanded === wh.id) setExpanded(null);
+                              toast.success(`تم حذف ثلاجة "${wh.name}" بنجاح`);
+                            }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
+                          }
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -478,9 +638,23 @@ export function Warehouses() {
                                         {ch.storageType}
                                       </Badge>
                                     </div>
-                                    <span className="text-white/80 text-xs font-medium">
-                                      {ch.temp}°م
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-white/80 text-xs font-medium">
+                                        {ch.temp}°م
+                                      </span>
+                                      <button
+                                        onClick={() =>
+                                          confirmDelete(ch.code, () => {
+                                            deleteChamber(ch.id);
+                                            toast.success(`تم حذف العنبر "${ch.code}" بنجاح`);
+                                          }, { title: "حذف العنبر", description: `سيتم حذف العنبر "${ch.code}" نهائياً.` })
+                                        }
+                                        className="p-1 rounded bg-white/10 hover:bg-white/25 text-white/80 hover:text-white transition-colors"
+                                        title="حذف العنبر"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    </div>
                                   </div>
 
                                   <div className="p-3 space-y-2.5">
@@ -609,6 +783,8 @@ export function Warehouses() {
             })}
           </div>
         </Card>
+        )
+      }
       </motion.div>
 
       {/* ══════════════════════════════════════════════════════════════
@@ -1255,6 +1431,192 @@ export function Warehouses() {
               variant="outline"
               onClick={() => setShowAddCH(null)}
             >
+              إلغاء
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {confirmDialog}
+
+      {/* ══════════════════════════════════════════════════════════════
+          Dialog: تعديل ثلاجة
+      ══════════════════════════════════════════════════════════════ */}
+      <Dialog open={!!editWH} onOpenChange={() => setEditWH(null)}>
+        <DialogContent
+          dir="rtl"
+          className="max-w-lg max-h-[90vh] overflow-y-auto bg-white text-right"
+        >
+          <DialogHeader>
+            <DialogTitle>تعديل ثلاجة: {editWH?.name}</DialogTitle>
+          </DialogHeader>
+
+          <Tabs defaultValue="basics" className="w-full" dir="rtl">
+            <TabsList
+              dir="rtl"
+              className="grid grid-cols-4 w-full mb-2 bg-[#f3f4f6] rounded-xl p-1 h-auto"
+            >
+              <TabsTrigger value="basics" className="rounded-xl text-sm data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">
+                الأساسيات
+              </TabsTrigger>
+              <TabsTrigger value="capacity" className="rounded-xl text-sm data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">
+                الأبعاد والسعة
+              </TabsTrigger>
+              <TabsTrigger value="machine" className="rounded-xl text-sm data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">
+                الماكينة والأسعار
+              </TabsTrigger>
+              <TabsTrigger value="notes" className="rounded-xl text-sm data-[state=active]:bg-[#155dfc] data-[state=active]:text-white data-[state=active]:shadow-none text-gray-700">
+                ملاحظات
+              </TabsTrigger>
+            </TabsList>
+
+            {/* ── Tab 1: Basics ── */}
+            <TabsContent value="basics" className="space-y-4 mt-0 pt-2">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2 space-y-1.5">
+                  <Label>اسم الثلاجة *</Label>
+                  <Input
+                    dir="rtl"
+                    className="border border-[#d1d5dc] bg-[#f9fafb]"
+                    value={editWHForm.name}
+                    onChange={(e) => setEditWHForm({ ...editWHForm, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>حرف الثلاجة *</Label>
+                  <Input
+                    maxLength={2}
+                    className="text-center uppercase border border-[#d1d5dc] bg-[#f9fafb]"
+                    dir="ltr"
+                    value={editWHForm.letter}
+                    onChange={(e) => setEditWHForm({ ...editWHForm, letter: e.target.value.toUpperCase() })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>حالة التشغيل</Label>
+                  <Select
+                    value={editWHForm.operationStatus}
+                    onValueChange={(v) => setEditWHForm({ ...editWHForm, operationStatus: v })}
+                  >
+                    <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent dir="rtl">
+                      <SelectItem value="تشغيل">تشغيل</SelectItem>
+                      <SelectItem value="صيانة">صيانة</SelectItem>
+                      <SelectItem value="إيقاف">إيقاف</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>نوع التخزين</Label>
+                  <Select
+                    value={editWHForm.storageType}
+                    onValueChange={(v) => setEditWHForm({ ...editWHForm, storageType: v })}
+                  >
+                    <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent dir="rtl">
+                      <SelectItem value="تجميد">تجميد</SelectItem>
+                      <SelectItem value="تبريد">تبريد</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ── Tab 2: Capacity ── */}
+            <TabsContent value="capacity" className="space-y-4 mt-0 pt-2">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">الأبعاد</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {[{label:"الطول (م)",key:"length"},{label:"العرض (م)",key:"width"},{label:"الارتفاع (م)",key:"height"}].map(({label,key}) => (
+                    <div key={key} className="space-y-1.5">
+                      <Label>{label}</Label>
+                      <Input type="number" placeholder="0" dir="rtl" className="border border-gray-300"
+                        value={editWHForm[key as keyof typeof editWHForm]}
+                        onChange={(e) => setEditWHForm({ ...editWHForm, [key]: e.target.value })} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>السعة الكلية (طن)</Label>
+                <Input type="number" placeholder="0" dir="rtl" className="border border-gray-300"
+                  value={editWHForm.capacityWeight}
+                  onChange={(e) => setEditWHForm({ ...editWHForm, capacityWeight: e.target.value })} />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">السعة بالعبوات</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {[{label:"طرد",key:"capacityBox"},{label:"شوال",key:"capacitySack"},{label:"كرتونة",key:"capacityCarton"}].map(({label,key}) => (
+                    <div key={key} className="space-y-1.5">
+                      <Label>{label}</Label>
+                      <Input type="number" placeholder="0" dir="rtl" className="border border-gray-300"
+                        value={editWHForm[key as keyof typeof editWHForm]}
+                        onChange={(e) => setEditWHForm({ ...editWHForm, [key]: e.target.value })} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ── Tab 3: Machine & Pricing ── */}
+            <TabsContent value="machine" className="space-y-4 mt-0 pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>نوع الماكينة</Label>
+                  <Input placeholder="كمبروسور مكثف هواء" dir="rtl" className="border border-gray-300"
+                    value={editWHForm.machineType}
+                    onChange={(e) => setEditWHForm({ ...editWHForm, machineType: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>القدرة (حصان)</Label>
+                  <Input type="number" placeholder="0" dir="rtl" className="border border-gray-300"
+                    value={editWHForm.machinePower}
+                    onChange={(e) => setEditWHForm({ ...editWHForm, machinePower: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>الإيجار اليومي (ج.م)</Label>
+                  <Input type="number" placeholder="0.00" dir="rtl" className="border border-gray-300"
+                    value={editWHForm.dailyRent}
+                    onChange={(e) => setEditWHForm({ ...editWHForm, dailyRent: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>الإيجار الشهري (ج.م)</Label>
+                  <Input type="number" placeholder="0.00" dir="rtl" className="border border-gray-300"
+                    value={editWHForm.monthlyRent}
+                    onChange={(e) => setEditWHForm({ ...editWHForm, monthlyRent: e.target.value })} />
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* ── Tab 4: Notes ── */}
+            <TabsContent value="notes" className="mt-0 pt-2">
+              <div className="space-y-1.5">
+                <Label>ملاحظات</Label>
+                <Textarea
+                  placeholder="ملاحظات إضافية..."
+                  dir="rtl"
+                  rows={5}
+                  className="resize-none border border-gray-300"
+                  value={editWHForm.notes}
+                  onChange={(e) => setEditWHForm({ ...editWHForm, notes: e.target.value })}
+                />
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveEditWH} className="bg-[#155dfc] hover:bg-blue-700 text-white">
+              حفظ التعديلات
+            </Button>
+            <Button variant="outline" onClick={() => setEditWH(null)}>
               إلغاء
             </Button>
           </DialogFooter>

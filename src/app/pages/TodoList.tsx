@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, CheckSquare, Circle, Clock, User } from "lucide-react";
+import { Plus, CheckSquare, Circle, Clock, User, Search, X } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -8,11 +8,11 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
-import { tasks as initialTasks, employees } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
 
-type Task = typeof initialTasks[0];
+type Task = ReturnType<typeof useDb>["tasks"][0];
 
 const priorityColors: Record<string, string> = {
   "عالية": "bg-red-100 text-red-700 border-red-200",
@@ -36,16 +36,27 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 export function TodoList() {
-  const [tasks, setTasks] = useState(initialTasks);
+  const { tasks: dbTasks, employees, addTask, updateTask } = useDb();
+  const [tasks, setTasks] = useState(dbTasks);
   const [showAdd, setShowAdd] = useState(false);
   const [filter, setFilter] = useState<"all" | "pending" | "completed">("all");
+  const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState<"all" | "عالية" | "متوسطة" | "منخفضة">("all");
   const [newTask, setNewTask] = useState({ title: "", type: "", priority: "", dueDate: "", assignee: "" });
 
   const toggleTask = (id: number) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, status: t.status === "completed" ? "pending" : "completed" } : t));
+    const updated = tasks.map(t => t.id === id ? { ...t, status: t.status === "completed" ? "pending" : "completed" } : t);
+    setTasks(updated);
+    const t = updated.find(task => task.id === id);
+    if (t) updateTask(id, { status: t.status });
   };
 
-  const filtered = tasks.filter(t => filter === "all" ? true : filter === "pending" ? t.status === "pending" : t.status === "completed");
+  const filtered = tasks.filter(t => {
+    if (filter !== "all" && (filter === "pending" ? t.status !== "pending" : t.status !== "completed")) return false;
+    if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
+    if (search && !t.title.includes(search) && !t.assignee.includes(search)) return false;
+    return true;
+  });
   const pending = tasks.filter(t => t.status === "pending");
   const completed = tasks.filter(t => t.status === "completed");
 
@@ -95,20 +106,63 @@ export function TodoList() {
         ))}
       </motion.div>
 
-      {/* Filter */}
-      <motion.div variants={anim} className="flex items-center gap-2">
-        {(["all", "pending", "completed"] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={cn(
-              "px-4 py-1.5 rounded-full text-sm transition-colors border",
-              filter === f ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
-            )}
-          >
-            {f === "all" ? "الكل" : f === "pending" ? "معلقة" : "مكتملة"}
-          </button>
-        ))}
+      {/* Search + Filters */}
+      <motion.div variants={anim} className="flex flex-col gap-3">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+          <Input
+            dir="rtl"
+            placeholder="ابحث عن مهمة أو مسؤول..."
+            className="pr-9 pl-9"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Status + Priority filters */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+            {(["all", "pending", "completed"] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                  filter === f ? "bg-blue-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                {f === "all" ? "الكل" : f === "pending" ? "معلقة" : "مكتملة"}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+            {(["all", "عالية", "متوسطة", "منخفضة"] as const).map(p => (
+              <button
+                key={p}
+                onClick={() => setPriorityFilter(p)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1",
+                  priorityFilter === p
+                    ? p === "all" ? "bg-blue-600 text-white shadow-sm"
+                      : p === "عالية" ? "bg-red-500 text-white shadow-sm"
+                      : p === "متوسطة" ? "bg-orange-500 text-white shadow-sm"
+                      : "bg-gray-500 text-white shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                )}
+              >
+                {p !== "all" && <div className={cn("w-1.5 h-1.5 rounded-full", priorityFilter === p ? "bg-white" : priorityDot[p])} />}
+                {p === "all" ? "كل الأولويات" : p}
+              </button>
+            ))}
+          </div>
+        </div>
       </motion.div>
 
       {/* Tasks */}

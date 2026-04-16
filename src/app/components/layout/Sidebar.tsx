@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { useTheme } from "../../context/ThemeContext";
 
 const navItems = [
   { path: "/dashboard", label: "لوحة التحكم", icon: LayoutDashboard },
@@ -30,6 +31,7 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, onCollapse }: SidebarProps) {
   const navigate = useNavigate();
+  const { theme } = useTheme();
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -37,11 +39,12 @@ export function Sidebar({ collapsed, onCollapse }: SidebarProps) {
         initial={false}
         animate={{ width: collapsed ? 72 : 260 }}
         transition={{ duration: 0.25, ease: "easeInOut" }}
-        className="flex flex-col h-full bg-[#0F2044] text-white overflow-hidden flex-shrink-0"
+        className="flex flex-col h-full text-white overflow-hidden flex-shrink-0"
+        style={{ background: theme.sidebar }}
       >
         {/* Logo */}
         <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10">
-          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-500 flex-shrink-0">
+          <div className="flex items-center justify-center w-9 h-9 rounded-xl flex-shrink-0" style={{ background: theme.sidebarPrimary }}>
             <Snowflake className="w-5 h-5 text-white" />
           </div>
           <AnimatePresence>
@@ -54,7 +57,7 @@ export function Sidebar({ collapsed, onCollapse }: SidebarProps) {
                 className="overflow-hidden whitespace-nowrap"
               >
                 <p className="text-sm font-semibold text-white leading-tight">نظام مخازن</p>
-                <p className="text-xs text-blue-300 leading-tight">التبريد</p>
+                <p className="text-xs leading-tight" style={{ color: theme.sidebarPrimary }}>التبريد</p>
               </motion.div>
             )}
           </AnimatePresence>
@@ -82,13 +85,14 @@ export function Sidebar({ collapsed, onCollapse }: SidebarProps) {
               const navContent = (
                 <NavLink
                   to={item.path}
+                  style={({ isActive }) => isActive ? { background: theme.primary } : {}}
                   className={({ isActive }) =>
                     cn(
                       "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 group",
                       "hover:bg-white/10",
                       collapsed && "justify-center px-0",
                       isActive
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-900/30"
+                        ? "text-white shadow-lg"
                         : "text-white/75 hover:text-white"
                     )
                   }

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { useSearchParams } from "react-router";
 import {
   Plus, Trash2, Printer, Save,
   PackagePlus, PackageMinus, ArrowLeftRight, AlertCircle,
-  Thermometer, MessageCircle, Gift, Cigarette, DoorOpen, Send, X,
+  Thermometer, MessageCircle, Gift, Cigarette, DoorOpen, X,
+  List, Search, Filter, ChevronDown,
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -15,7 +15,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Checkbox } from "../components/ui/checkbox";
-import { customers, items, packages, warehouses, customerItems, employees } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { useConfirmDelete } from "../components/ui/ConfirmDialog";
 import { toast } from "sonner";
 import { cn } from "../components/ui/utils";
@@ -26,6 +26,11 @@ const anim = { hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0, transiti
 
 /* ─── tab meta ─── */
 const TAB_META = {
+  index: {
+    label: "كل الحركات", icon: List, color: "text-blue-600",
+    activeBg: "bg-blue-600", activeText: "text-white", headerBg: "bg-blue-700",
+    prefix: "ALL", invoiceLabel: "سجل الحركات", invoiceDesc: "عرض وبحث وتصفية جميع الحركات",
+  },
   incoming: {
     label: "الوارد", icon: PackagePlus, color: "text-green-600",
     activeBg: "bg-green-600", activeText: "text-white", headerBg: "bg-green-600",
@@ -44,26 +49,305 @@ const TAB_META = {
 };
 
 /* ─── WhatsApp helper ─── */
-const sendWhatsApp = (message: string) => {
-  const phone = localStorage.getItem("wa_notify_phone") || "";
-  if (!phone) {
-    toast.info("لم يتم تحديد رقم واتساب للإشعارات — يمكنك تعيينه من الإعدادات");
+const sendWhatsApp = (message: string, toPhone: string) => {
+  if (!toPhone) {
+    toast.info("لم يتم تحديد رقم العميل للإرسال");
     return;
   }
-  const clean = phone.replace(/\D/g, "").replace(/^0/, "20");
+  const clean = toPhone.replace(/\D/g, "").replace(/^0/, "20");
   window.open(`https://wa.me/${clean}?text=${encodeURIComponent(message)}`, "_blank");
 };
 
-/* ─── Naulage lookup ─── */
-const getNaulage = (customerId: string, itemName: string): number => {
-  if (!customerId) return 0;
-  const specific = customerItems.find(
-    ci => ci.customerId === Number(customerId) && ci.itemName === itemName,
-  );
-  if (specific) return specific.naulage;
-  const cust = customers.find(c => c.id === Number(customerId));
-  return cust?.defaultNaulage ?? 0;
+
+
+/* ══════════════════════════════════════════════
+   INDEX TAB — كل الحركات
+══════════════════════════════════════════════ */
+interface MovementRecord {
+  id: string;
+  type: "incoming" | "outgoing" | "transfers";
+  invoiceNo: string;
+  customer: string;
+  item: string;
+  quantity: number;
+  weight?: number;
+  naulage: number;
+  warehouse: string;
+  date: string;
+  temperature?: string;
+  driver?: string;
+  notes?: string;
+}
+
+const MOCK_MOVEMENTS: MovementRecord[] = [
+  { id: "1", type: "incoming", invoiceNo: "INV-2024-101", customer: "شركة النور للتجارة", item: "دجاج مجمد", quantity: 200, weight: 480, naulage: 1200, warehouse: "ثلاجة اللحوم", date: "2024-01-20", temperature: "-18", driver: "يوسف عبدالرحمن" },
+  { id: "2", type: "outgoing", invoiceNo: "OUT-2024-045", customer: "مجموعة الخليج", item: "لحم بقري", quantity: 50, naulage: 600, warehouse: "ثلاجة اللحوم", date: "2024-01-19", driver: "طارق الحسين" },
+  { id: "3", type: "transfers", invoiceNo: "TRF-2024-012", customer: "شركة النور للتجارة", item: "أسماك", quantity: 30, naulage: 0, warehouse: "ثلاجة الأسماك", date: "2024-01-18", notes: "تحويل بين مخازن" },
+  { id: "4", type: "incoming", invoiceNo: "INV-2024-100", customer: "مؤسسة الفجر", item: "خضروات مبردة", quantity: 150, weight: 320, naulage: 900, warehouse: "ثلاجة الخضروات", date: "2024-01-17", temperature: "-5", driver: "يوسف عبدالرحمن" },
+  { id: "5", type: "outgoing", invoiceNo: "OUT-2024-044", customer: "شركة النور للتجارة", item: "دجاج مجمد", quantity: 80, naulage: 480, warehouse: "ثلاجة اللحوم", date: "2024-01-16", driver: "طارق الحسين" },
+  { id: "6", type: "transfers", invoiceNo: "TRF-2024-011", customer: "مجموعة الخليج", item: "لحم بقري", quantity: 20, naulage: 0, warehouse: "ثلاجة الحبوب", date: "2024-01-15", notes: "تحويل بين عملاء" },
+  { id: "7", type: "incoming", invoiceNo: "INV-2024-099", customer: "مجموعة الخليج", item: "فواكه مبردة", quantity: 100, weight: 210, naulage: 600, warehouse: "ثلاجة الخضروات", date: "2024-01-14", temperature: "-2" },
+  { id: "8", type: "outgoing", invoiceNo: "OUT-2024-043", customer: "مؤسسة الفجر", item: "خضروات مبردة", quantity: 60, naulage: 360, warehouse: "ثلاجة الخضروات", date: "2024-01-13" },
+  { id: "9", type: "incoming", invoiceNo: "INV-2024-098", customer: "شركة النور للتجارة", item: "أسماك", quantity: 70, weight: 140, naulage: 420, warehouse: "ثلاجة الأسماك", date: "2024-01-12", temperature: "-20", driver: "يوسف عبدالرحمن" },
+  { id: "10", type: "outgoing", invoiceNo: "OUT-2024-042", customer: "مجموعة الخليج", item: "فواكه مبردة", quantity: 40, naulage: 240, warehouse: "ثلاجة الخضروات", date: "2024-01-11" },
+];
+
+const TYPE_LABELS: Record<MovementRecord["type"], string> = {
+  incoming: "وارد",
+  outgoing: "منصرف",
+  transfers: "تحويل",
 };
+const TYPE_COLORS: Record<MovementRecord["type"], string> = {
+  incoming: "bg-green-100 text-green-700",
+  outgoing: "bg-red-100 text-red-700",
+  transfers: "bg-orange-100 text-orange-700",
+};
+const TYPE_DOT: Record<MovementRecord["type"], string> = {
+  incoming: "bg-green-500",
+  outgoing: "bg-red-500",
+  transfers: "bg-orange-500",
+};
+
+function IndexTab() {
+  const { customers } = useDb();
+
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | MovementRecord["type"]>("all");
+  const [customerFilter, setCustomerFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+  const filtered = useMemo(() => {
+    return MOCK_MOVEMENTS.filter(m => {
+      if (typeFilter !== "all" && m.type !== typeFilter) return false;
+      if (customerFilter !== "all" && m.customer !== customerFilter) return false;
+      if (dateFrom && m.date < dateFrom) return false;
+      if (dateTo && m.date > dateTo) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return (
+          m.invoiceNo.toLowerCase().includes(q) ||
+          m.customer.toLowerCase().includes(q) ||
+          m.item.toLowerCase().includes(q) ||
+          m.warehouse.toLowerCase().includes(q) ||
+          (m.driver || "").toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [search, typeFilter, customerFilter, dateFrom, dateTo]);
+
+  const uniqueCustomers = useMemo(() => [...new Set(MOCK_MOVEMENTS.map(m => m.customer))], []);
+
+  const totalIncoming = filtered.filter(m => m.type === "incoming").reduce((s, m) => s + m.quantity, 0);
+  const totalOutgoing = filtered.filter(m => m.type === "outgoing").reduce((s, m) => s + m.quantity, 0);
+  const totalTransfers = filtered.filter(m => m.type === "transfers").reduce((s, m) => s + m.quantity, 0);
+  const totalNaulage = filtered.reduce((s, m) => s + m.naulage, 0);
+
+  const hasActiveFilters = typeFilter !== "all" || customerFilter !== "all" || dateFrom || dateTo;
+
+  return (
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-4">
+      {/* Stats */}
+      <motion.div variants={anim} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "إجمالي الوارد", value: totalIncoming.toLocaleString(), unit: "طرد", color: "border-green-200 bg-green-50", valueColor: "text-green-700", icon: PackagePlus, iconColor: "text-green-600" },
+          { label: "إجمالي المنصرف", value: totalOutgoing.toLocaleString(), unit: "طرد", color: "border-red-200 bg-red-50", valueColor: "text-red-700", icon: PackageMinus, iconColor: "text-red-600" },
+          { label: "إجمالي التحويلات", value: totalTransfers.toLocaleString(), unit: "طرد", color: "border-orange-200 bg-orange-50", valueColor: "text-orange-700", icon: ArrowLeftRight, iconColor: "text-orange-600" },
+          { label: "إجمالي النولون", value: totalNaulage.toLocaleString(), unit: "ج.م", color: "border-amber-200 bg-amber-50", valueColor: "text-amber-700", icon: List, iconColor: "text-amber-600" },
+        ].map((s, i) => {
+          const SIcon = s.icon;
+          return (
+            <Card key={i} className={`border shadow-sm ${s.color}`}>
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className={`p-2 rounded-lg bg-white/60`}><SIcon className={`w-4 h-4 ${s.iconColor}`} /></div>
+                <div>
+                  <p className="text-xs text-gray-500">{s.label}</p>
+                  <p className={`text-xl font-bold ${s.valueColor}`}>{s.value} <span className="text-xs font-normal">{s.unit}</span></p>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </motion.div>
+
+      {/* Search & Filter Bar */}
+      <motion.div variants={anim}>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Search */}
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="ابحث برقم الفاتورة، العميل، الصنف، المخزن..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  dir="rtl"
+                  className="w-full pr-9 pl-4 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                />
+                {search && (
+                  <button onClick={() => setSearch("")} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Type quick filter */}
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                {(["all", "incoming", "outgoing", "transfers"] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setTypeFilter(t)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap",
+                      typeFilter === t ? "bg-white shadow-sm text-gray-800" : "text-gray-500 hover:text-gray-700",
+                    )}
+                  >
+                    {t === "all" ? "الكل" : TYPE_LABELS[t]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Advanced Filters toggle */}
+              <button
+                onClick={() => setShowFilters(f => !f)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm border transition-all",
+                  showFilters || hasActiveFilters
+                    ? "border-blue-400 text-blue-600 bg-blue-50"
+                    : "border-gray-200 text-gray-600 hover:border-gray-300",
+                )}
+              >
+                <Filter className="w-4 h-4" />
+                فلتر
+                {hasActiveFilters && <span className="w-2 h-2 rounded-full bg-blue-500" />}
+                <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showFilters && "rotate-180")} />
+              </button>
+            </div>
+
+            {/* Advanced Filters Panel */}
+            <AnimatePresence>
+              {showFilters && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-3 border-t grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-gray-500 font-medium">العميل</label>
+                      <select
+                        value={customerFilter}
+                        onChange={e => setCustomerFilter(e.target.value)}
+                        dir="rtl"
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                      >
+                        <option value="all">كل العملاء</option>
+                        {uniqueCustomers.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-gray-500 font-medium">من تاريخ</label>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={e => setDateFrom(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-gray-500 font-medium">إلى تاريخ</label>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        onChange={e => setDateTo(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                      />
+                    </div>
+                  </div>
+                  {hasActiveFilters && (
+                    <button
+                      onClick={() => { setTypeFilter("all"); setCustomerFilter("all"); setDateFrom(""); setDateTo(""); }}
+                      className="mt-2 text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
+                    >
+                      <X className="w-3.5 h-3.5" />مسح كل الفلاتر
+                    </button>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Table */}
+      <motion.div variants={anim}>
+        <Card className="border-0 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+            <h3 className="font-semibold text-gray-800">نتائج الحركات</h3>
+            <span className="text-xs text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">{filtered.length} حركة</span>
+          </div>
+          <CardContent className="p-0">
+            {filtered.length === 0 ? (
+              <div className="py-16 text-center text-gray-400">
+                <List className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">لا توجد حركات تطابق البحث</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[900px]">
+                  <thead>
+                    <tr className="bg-blue-50 border-b border-blue-100">
+                      {["#","النوع","رقم الفاتورة","العميل","الصنف","الكمية","النولون","المخزن","السائق","التاريخ"].map((h, i) => (
+                        <th key={i} className="text-right px-3 py-2.5 text-xs font-medium text-blue-800 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((m, idx) => (
+                      <motion.tr
+                        key={m.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: idx * 0.03 }}
+                        className="border-b hover:bg-gray-50/60 transition-colors"
+                      >
+                        <td className="px-3 py-3 text-gray-400 text-xs">{idx + 1}</td>
+                        <td className="px-3 py-3">
+                          <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium", TYPE_COLORS[m.type])}>
+                            <span className={cn("w-1.5 h-1.5 rounded-full", TYPE_DOT[m.type])} />
+                            {TYPE_LABELS[m.type]}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 font-mono text-xs text-blue-600 whitespace-nowrap">{m.invoiceNo}</td>
+                        <td className="px-3 py-3 text-gray-700 text-xs">{m.customer}</td>
+                        <td className="px-3 py-3 text-gray-700 text-xs">{m.item}</td>
+                        <td className="px-3 py-3">
+                          <span className="font-semibold text-gray-800">{m.quantity.toLocaleString()}</span>
+                          <span className="text-xs text-gray-400 mr-1">طرد</span>
+                          {m.weight && <span className="text-xs text-gray-400 block">{m.weight.toLocaleString()} كجم</span>}
+                        </td>
+                        <td className="px-3 py-3 text-amber-600 font-medium text-xs">{m.naulage ? m.naulage.toLocaleString() + " ج.م" : "—"}</td>
+                        <td className="px-3 py-3 text-gray-600 text-xs">{m.warehouse}</td>
+                        <td className="px-3 py-3 text-gray-500 text-xs">{m.driver || "—"}</td>
+                        <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{m.date}</td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 /* ══════════════════════════════════════════════
    INCOMING TAB
@@ -79,7 +363,20 @@ interface GratuityDist {
 }
 
 function IncomingTab() {
+  const { customers, items, packages, warehouses, customerItems, employees, customerDrivers, customerContacts } = useDb();
+
+  const getNaulage = (customerId: string, itemName: string): number => {
+    if (!customerId) return 0;
+    const specific = customerItems.find(
+      ci => ci.customerId === Number(customerId) && ci.itemName === itemName,
+    );
+    if (specific) return specific.naulage;
+    const cust = customers.find(c => c.id === Number(customerId));
+    return cust?.defaultNaulage ?? 0;
+  };
+
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [selectedWaPhone, setSelectedWaPhone] = useState("");
   const [temperature, setTemperature] = useState("");
   const [openingFee, setOpeningFee] = useState("");
   const [rows, setRows] = useState<IncomingRow[]>([
@@ -105,7 +402,23 @@ function IncomingTab() {
   const onCustomerChange = (val: string) => {
     setSelectedCustomerId(val);
     setRows(r => r.map(x => ({ ...x, naulage: x.item ? String(getNaulage(val, x.item)) : x.naulage })));
+    const cust = customers.find(c => c.id === Number(val));
+    setSelectedWaPhone(cust?.phone || "");
   };
+
+  const customerPhoneOptions = (() => {
+    if (!selectedCustomerId) return [];
+    const cust = customers.find(c => c.id === Number(selectedCustomerId));
+    const opts: { label: string; phone: string }[] = [];
+    if (cust?.phone) opts.push({ label: `${cust.name} (رئيسي)`, phone: cust.phone });
+    customerContacts
+      .filter(c => c.customerId === Number(selectedCustomerId))
+      .forEach(c => opts.push({ label: `${c.name}${c.role ? ` — ${c.role}` : ""}`, phone: c.phone }));
+    customerDrivers
+      .filter(d => d.customerId === Number(selectedCustomerId))
+      .forEach(d => opts.push({ label: `${d.name} — سائق`, phone: d.phone }));
+    return opts;
+  })();
 
   const totalQty = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
   const totalWeight = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0);
@@ -115,7 +428,7 @@ function IncomingTab() {
     const customerName = customers.find(c => c.id === Number(selectedCustomerId))?.name || "عميل";
     const msg = `🟢 *وارد جديد*\nرقم الفاتورة: ${invoiceNo}\nالعميل: ${customerName}\nالكمية: ${totalQty.toLocaleString()} طرد\nالوزن: ${totalWeight.toLocaleString()} كجم\nدرجة الحرارة: ${temperature || "—"} °م\nالنولون: ${totalNaulage.toLocaleString()} ج.م\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
     toast.success(`تم حفظ فاتورة الاستلام ${invoiceNo} بنجاح`);
-    sendWhatsApp(msg);
+    sendWhatsApp(msg, selectedWaPhone);
   };
 
   const handleGratuitySave = () => {
@@ -149,6 +462,23 @@ function IncomingTab() {
                   <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
                   <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
+                {selectedCustomerId && (
+                  <div className="mt-1 space-y-0.5">
+                    <Label className="text-[11px] text-gray-400 flex items-center gap-1"><MessageCircle className="w-3 h-3 text-green-500" />إرسال واتساب إلى</Label>
+                    <Select value={selectedWaPhone} onValueChange={setSelectedWaPhone}>
+                      <SelectTrigger dir="rtl" className="h-8 text-xs border-green-200 bg-green-50/40">
+                        <SelectValue placeholder="اختر رقم الإرسال" />
+                      </SelectTrigger>
+                      <SelectContent dir="rtl">
+                        {customerPhoneOptions.map(o => (
+                          <SelectItem key={o.phone} value={o.phone} className="text-xs">
+                            {o.label} — {o.phone}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>التاريخ *</Label>
@@ -366,7 +696,20 @@ const MOCK_AVAILABLE: Record<string, number> = {
 };
 
 function OutgoingTab() {
+  const { customers, items, packages, warehouses, customerItems, customerDrivers, customerContacts } = useDb();
+
+  const getNaulage = (customerId: string, itemName: string): number => {
+    if (!customerId) return 0;
+    const specific = customerItems.find(
+      ci => ci.customerId === Number(customerId) && ci.itemName === itemName,
+    );
+    if (specific) return specific.naulage;
+    const cust = customers.find(c => c.id === Number(customerId));
+    return cust?.defaultNaulage ?? 0;
+  };
+
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [selectedWaPhone, setSelectedWaPhone] = useState("");
   const [selectedDriver, setSelectedDriver] = useState("");
   const [temperature, setTemperature] = useState("");
   const [openingFee, setOpeningFee] = useState("");
@@ -394,7 +737,23 @@ function OutgoingTab() {
   const onCustomerChange = (val: string) => {
     setSelectedCustomerId(val);
     setRows(r => r.map(x => ({ ...x, naulage: x.item ? String(getNaulage(val, x.item)) : x.naulage })));
+    const cust = customers.find(c => c.id === Number(val));
+    setSelectedWaPhone(cust?.phone || "");
   };
+
+  const customerPhoneOptions = (() => {
+    if (!selectedCustomerId) return [];
+    const cust = customers.find(c => c.id === Number(selectedCustomerId));
+    const opts: { label: string; phone: string }[] = [];
+    if (cust?.phone) opts.push({ label: `${cust.name} (رئيسي)`, phone: cust.phone });
+    customerContacts
+      .filter(c => c.customerId === Number(selectedCustomerId))
+      .forEach(c => opts.push({ label: `${c.name}${c.role ? ` — ${c.role}` : ""}`, phone: c.phone }));
+    customerDrivers
+      .filter(d => d.customerId === Number(selectedCustomerId))
+      .forEach(d => opts.push({ label: `${d.name} — سائق`, phone: d.phone }));
+    return opts;
+  })();
 
   const hasError = (row: OutgoingRow) => Number(row.requestedQty) > row.availableQty && row.availableQty > 0 && row.requestedQty !== "";
   const totalQty = rows.reduce((s, r) => s + (Number(r.requestedQty) || 0), 0);
@@ -405,7 +764,7 @@ function OutgoingTab() {
     const customerName = customers.find(c => c.id === Number(selectedCustomerId))?.name || "عميل";
     const msg = `🔴 *منصرف جديد*\nرقم الفاتورة: ${invoiceNo}\nالعميل: ${customerName}\nالكمية: ${totalQty.toLocaleString()} طرد\nدرجة الحرارة: ${temperature || "—"} °م\nالنولون: ${totalNaulage.toLocaleString()} ج.م${openingFee ? `\nفتح عنبر: ${Number(openingFee).toLocaleString()} ج.م` : ""}\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
     toast.success(`تم حفظ فاتورة الصرف ${invoiceNo} بنجاح`);
-    sendWhatsApp(msg);
+    sendWhatsApp(msg, selectedWaPhone);
   };
 
   const handleTipsSave = () => {
@@ -429,6 +788,23 @@ function OutgoingTab() {
                   <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
                   <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
+                {selectedCustomerId && (
+                  <div className="mt-1 space-y-0.5">
+                    <Label className="text-[11px] text-gray-400 flex items-center gap-1"><MessageCircle className="w-3 h-3 text-green-500" />إرسال واتساب إلى</Label>
+                    <Select value={selectedWaPhone} onValueChange={setSelectedWaPhone}>
+                      <SelectTrigger dir="rtl" className="h-8 text-xs border-green-200 bg-green-50/40">
+                        <SelectValue placeholder="اختر رقم الإرسال" />
+                      </SelectTrigger>
+                      <SelectContent dir="rtl">
+                        {customerPhoneOptions.map(o => (
+                          <SelectItem key={o.phone} value={o.phone} className="text-xs">
+                            {o.label} — {o.phone}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>التاريخ *</Label>
@@ -616,6 +992,7 @@ function OutgoingTab() {
    TRANSFERS TAB CONTENT
 ══════════════════════════════════════════════ */
 function TransfersTab() {
+  const { customers, items, warehouses } = useDb();
   const [subTab, setSubTab] = useState("warehouses");
   const [temperature, setTemperature] = useState("");
   const trf = `TRF-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`;
@@ -788,58 +1165,96 @@ function TransfersTab() {
 /* ══════════════════════════════════════════════
    MAIN MOVEMENTS PAGE
 ══════════════════════════════════════════════ */
-type TabKey = "incoming" | "outgoing" | "transfers";
+type NewMovementTab = "incoming" | "outgoing" | "transfers";
+
+const NEW_MOVEMENT_TABS: { key: NewMovementTab; label: string; icon: typeof PackagePlus; activeBg: string; activeText: string; headerBg: string; invoiceLabel: string; invoiceDesc: string }[] = [
+  { key: "incoming",  label: "وارد",  icon: PackagePlus,    activeBg: "bg-green-600",  activeText: "text-white", headerBg: "bg-green-600",  invoiceLabel: "فاتورة استلام جديدة", invoiceDesc: "تسجيل البضاعة الواردة للمخزن" },
+  { key: "outgoing",  label: "منصرف", icon: PackageMinus,   activeBg: "bg-red-600",    activeText: "text-white", headerBg: "bg-red-600",    invoiceLabel: "فاتورة صرف جديدة",    invoiceDesc: "تسجيل البضاعة المنصرفة من المخزن" },
+  { key: "transfers", label: "تحويل", icon: ArrowLeftRight, activeBg: "bg-orange-600", activeText: "text-white", headerBg: "bg-orange-600", invoiceLabel: "تحويل جديد",          invoiceDesc: "تحويل الأصناف بين المخازن أو العملاء" },
+];
 
 export function Movements() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = (searchParams.get("tab") as TabKey) || "incoming";
-  const setTab = (tab: string) => setSearchParams({ tab }, { replace: true });
+  const [view, setView] = useState<"index" | "new">("index");
+  const [newTab, setNewTab] = useState<NewMovementTab>("incoming");
 
-  const meta = TAB_META[activeTab];
-  const Icon = meta.icon;
-  const invoiceNo = `${meta.prefix}-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`;
+  const activeMeta = NEW_MOVEMENT_TABS.find(t => t.key === newTab)!;
+  const ActiveIcon = activeMeta.icon;
 
+  /* ── INDEX VIEW ── */
+  if (view === "index") {
+    return (
+      <div className="space-y-5" dir="rtl">
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
+          <Card className="border-0 shadow-sm overflow-hidden">
+            <div className="bg-blue-700 px-5 py-4 text-white">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                    <List className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="font-bold">سجل الحركات</h2>
+                    <p className="text-xs opacity-80">عرض وبحث وتصفية جميع الحركات</p>
+                  </div>
+                </div>
+                <Button
+                  onClick={() => setView("new")}
+                  className="bg-white text-blue-700 hover:bg-blue-50 gap-2 font-semibold shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />حركة جديدة
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+        <IndexTab />
+      </div>
+    );
+  }
+
+  /* ── NEW MOVEMENT VIEW ── */
   return (
     <div className="space-y-5" dir="rtl">
-      {/* Page header */}
+      {/* Header */}
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <Card className="border-0 shadow-sm overflow-hidden">
-          <div className={cn("px-5 py-4 text-white", meta.headerBg)}>
+          <div className={cn("px-5 py-4 text-white", activeMeta.headerBg)}>
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setView("index")}
+                  className="w-9 h-9 bg-white/20 hover:bg-white/30 rounded-xl flex items-center justify-center transition-colors"
+                  title="رجوع لسجل الحركات"
+                >
+                  <ChevronDown className="w-5 h-5 -rotate-90" />
+                </button>
                 <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                  <Icon className="w-5 h-5" />
+                  <ActiveIcon className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="font-bold">{meta.invoiceLabel}</h2>
-                  <p className="text-xs opacity-80">{meta.invoiceDesc}</p>
+                  <h2 className="font-bold">{activeMeta.invoiceLabel}</h2>
+                  <p className="text-xs opacity-80">{activeMeta.invoiceDesc}</p>
                 </div>
-              </div>
-              <div className="flex items-center gap-3">
-                {/* WhatsApp notice */}
-                <div className="flex items-center gap-1.5 bg-white/10 rounded-lg px-3 py-1.5 text-xs">
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>واتساب: {localStorage.getItem("wa_notify_phone") || "غير محدد"}</span>
-                </div>
-                <div className="font-mono text-sm bg-white/20 px-3 py-1.5 rounded-lg">{invoiceNo}</div>
               </div>
             </div>
           </div>
-          {/* Tab navigation */}
-          <div className="px-5 py-3 bg-[#f3f4f6] flex items-center gap-2 border-b overflow-x-auto">
-            {(["incoming","outgoing","transfers"] as TabKey[]).map(tab => {
-              const m = TAB_META[tab];
-              const TabIcon = m.icon;
+
+          {/* Type tabs */}
+          <div className="px-5 py-3 bg-gray-50 border-b flex items-center gap-2 overflow-x-auto">
+            {NEW_MOVEMENT_TABS.map(t => {
+              const TIcon = t.icon;
               return (
                 <button
-                  key={tab}
-                  onClick={() => setTab(tab)}
+                  key={t.key}
+                  onClick={() => setNewTab(t.key)}
                   className={cn(
                     "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap",
-                    activeTab === tab ? `${m.activeBg} ${m.activeText} shadow-sm` : "text-gray-600 hover:bg-white",
+                    newTab === t.key
+                      ? `${t.activeBg} ${t.activeText} shadow-sm`
+                      : "text-gray-600 hover:bg-white",
                   )}
                 >
-                  <TabIcon className="w-4 h-4" />{m.label}
+                  <TIcon className="w-4 h-4" />{t.label}
                 </button>
               );
             })}
@@ -847,18 +1262,18 @@ export function Movements() {
         </Card>
       </motion.div>
 
-      {/* Tab content */}
+      {/* Form content */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={activeTab}
+          key={newTab}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
           transition={{ duration: 0.2 }}
         >
-          {activeTab === "incoming" && <IncomingTab />}
-          {activeTab === "outgoing" && <OutgoingTab />}
-          {activeTab === "transfers" && <TransfersTab />}
+          {newTab === "incoming"  && <IncomingTab />}
+          {newTab === "outgoing"  && <OutgoingTab />}
+          {newTab === "transfers" && <TransfersTab />}
         </motion.div>
       </AnimatePresence>
     </div>

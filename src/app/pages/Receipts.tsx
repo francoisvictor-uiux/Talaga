@@ -7,7 +7,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { receipts, customers } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { Wallet, Printer, Save, Search, X } from "lucide-react";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
@@ -17,6 +17,7 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 export function Receipts() {
+  const { receipts, customers } = useDb();
   const [historySearch, setHistorySearch] = useState("");
 
   const filteredReceipts = receipts.filter(r =>

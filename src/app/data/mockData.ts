@@ -44,6 +44,12 @@ export const customerDrivers = [
   { id: 4, customerId: 3, name: "رامي البلوي", phone: "01056789012", plate: "ي ك ل 3456" },
 ];
 
+export const customerContacts = [
+  { id: 1, customerId: 1, name: "إبراهيم سالم", phone: "01098765432", role: "مدير المشتريات" },
+  { id: 2, customerId: 1, name: "سمية حسن",     phone: "01187654321", role: "محاسبة" },
+  { id: 3, customerId: 2, name: "عصام الديب",   phone: "01276543210", role: "مسؤول المخزن" },
+];
+
 export const customerPricing = [
   { id: 1, customerId: 1, itemName: "دجاج مجمد", pricePerDay: 2.5, pricePerMonth: 70 },
   { id: 2, customerId: 1, itemName: "لحم بقري", pricePerDay: 4.0, pricePerMonth: 110 },

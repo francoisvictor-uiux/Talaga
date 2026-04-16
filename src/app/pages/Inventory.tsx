@@ -5,7 +5,7 @@ import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { inventory, customers, warehouses, items } from "../data/mockData";
+import { useDb } from "../context/DbContext";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 export function Inventory() {
+  const { inventory, customers, warehouses, items } = useDb();
   const [search, setSearch] = useState("");
   const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [itemFilter, setItemFilter] = useState("all");
