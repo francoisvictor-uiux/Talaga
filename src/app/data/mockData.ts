@@ -83,6 +83,43 @@ export const employees = [
   { id: 6, name: "نور محمد الصعيدي", role: "عامل مخزن", status: "active", phone: "01266666666", email: "nour@coldstorage.eg", salary: 3000, joinDate: "2023-08-15" },
 ];
 
+// ===== SALARY RECORDS =====
+export const salaryRecords = [
+  { id: 1, employeeId: 1, month: "2024-01", baseSalary: 8500, bonus: 500,  deductions: 0,   netSalary: 9000,  status: "مدفوع",   paidDate: "2024-01-25", notes: "" },
+  { id: 2, employeeId: 2, month: "2024-01", baseSalary: 6000, bonus: 0,    deductions: 200, netSalary: 5800,  status: "مدفوع",   paidDate: "2024-01-25", notes: "استقطاع سلفة" },
+  { id: 3, employeeId: 3, month: "2024-01", baseSalary: 4500, bonus: 0,    deductions: 150, netSalary: 4350,  status: "مدفوع",   paidDate: "2024-01-25", notes: "استقطاع غياب يوم" },
+  { id: 4, employeeId: 5, month: "2024-01", baseSalary: 3000, bonus: 0,    deductions: 0,   netSalary: 3000,  status: "مدفوع",   paidDate: "2024-01-25", notes: "" },
+  { id: 5, employeeId: 6, month: "2024-01", baseSalary: 3000, bonus: 0,    deductions: 0,   netSalary: 3000,  status: "مدفوع",   paidDate: "2024-01-25", notes: "" },
+  { id: 6, employeeId: 1, month: "2024-02", baseSalary: 8500, bonus: 1000, deductions: 0,   netSalary: 9500,  status: "مدفوع",   paidDate: "2024-02-25", notes: "إكرامية شهر فبراير" },
+  { id: 7, employeeId: 2, month: "2024-02", baseSalary: 6000, bonus: 0,    deductions: 200, netSalary: 5800,  status: "مدفوع",   paidDate: "2024-02-25", notes: "استقطاع سلفة" },
+  { id: 8, employeeId: 3, month: "2024-02", baseSalary: 4500, bonus: 0,    deductions: 0,   netSalary: 4500,  status: "مدفوع",   paidDate: "2024-02-25", notes: "" },
+  { id: 9, employeeId: 5, month: "2024-02", baseSalary: 3000, bonus: 0,    deductions: 0,   netSalary: 3000,  status: "معلق",    paidDate: "",           notes: "" },
+  { id: 10,employeeId: 6, month: "2024-02", baseSalary: 3000, bonus: 0,    deductions: 0,   netSalary: 3000,  status: "معلق",    paidDate: "",           notes: "" },
+];
+
+// ===== LEAVE REQUESTS =====
+export const leaveRequests = [
+  { id: 1, employeeId: 1, type: "سنوي",      startDate: "2024-02-10", endDate: "2024-02-14", days: 5, status: "موافق",   reason: "إجازة سنوية",        approvedBy: "الإدارة" },
+  { id: 2, employeeId: 3, type: "مرضي",      startDate: "2024-01-08", endDate: "2024-01-08", days: 1, status: "موافق",   reason: "مراجعة طبية",         approvedBy: "أحمد محمد" },
+  { id: 3, employeeId: 2, type: "عارض",      startDate: "2024-02-20", endDate: "2024-02-20", days: 1, status: "معلق",    reason: "ظروف طارئة",          approvedBy: "" },
+  { id: 4, employeeId: 5, type: "بدون راتب", startDate: "2024-03-01", endDate: "2024-03-03", days: 3, status: "مرفوض",  reason: "شؤون شخصية",          approvedBy: "أحمد محمد" },
+  { id: 5, employeeId: 6, type: "سنوي",      startDate: "2024-03-15", endDate: "2024-03-17", days: 3, status: "معلق",    reason: "إجازة سنوية مستحقة", approvedBy: "" },
+];
+
+// ===== ADVANCES =====
+export const advances = [
+  { id: 1, employeeId: 2, amount: 2000, date: "2024-01-05", reason: "ظروف طارئة",     deductMonths: 2, monthlyDeduction: 1000, remainingAmount: 1000, status: "نشط"  },
+  { id: 2, employeeId: 3, amount: 1500, date: "2023-12-10", reason: "مصاريف علاج",    deductMonths: 3, monthlyDeduction: 500,  remainingAmount: 0,    status: "مسدد" },
+  { id: 3, employeeId: 5, amount: 500,  date: "2024-02-01", reason: "احتياجات شخصية", deductMonths: 1, monthlyDeduction: 500,  remainingAmount: 500,  status: "نشط"  },
+];
+
+// ===== ABSENCE RECORDS =====
+export const absenceRecords = [
+  { id: 1, employeeId: 3, date: "2024-01-08", type: "غياب",  reason: "",             deduction: 150, notes: "بدون إذن" },
+  { id: 2, employeeId: 5, date: "2024-01-22", type: "تأخير", reason: "ازدحام مرور", deduction: 50,  notes: "تأخير ساعتين" },
+  { id: 3, employeeId: 6, date: "2024-02-05", type: "غياب",  reason: "",             deduction: 100, notes: "بدون إذن" },
+];
+
 // ===== ITEMS =====
 export const items = [
   { id: 1, code: "د-001", prefix: "د", name: "دجاج مجمد",       storageType: "تجميد",  maxDays: 180, alertDays: 14, status: "active",   image: "" },

@@ -15,6 +15,10 @@ import {
   tasks         as _tasks,
   auditLogs     as _auditLogs,
   inventory     as _inventory,
+  salaryRecords as _salaryRecords,
+  leaveRequests as _leaveRequests,
+  advances      as _advances,
+  absenceRecords as _absenceRecords,
 } from "../data/mockData";
 
 /* ── infer types from data arrays ── */
@@ -33,6 +37,10 @@ type Receipt        = typeof _receipts[0];
 type Task           = typeof _tasks[0];
 type AuditLog       = typeof _auditLogs[0];
 type InventoryRow   = typeof _inventory[0];
+type SalaryRecord   = typeof _salaryRecords[0];
+type LeaveRequest   = typeof _leaveRequests[0];
+type Advance        = typeof _advances[0];
+type AbsenceRecord  = typeof _absenceRecords[0];
 
 /* ── Extended Customer with optional image ── */
 export type CustomerExt = Customer & { image?: string };
@@ -127,6 +135,30 @@ interface DbCtx {
   /* Inventory */
   inventory: InventoryRow[];
   updateInventory: (id: number, patch: Partial<InventoryRow>) => void;
+
+  /* HR - Salaries */
+  salaryRecords: SalaryRecord[];
+  addSalaryRecord:    (r: Omit<SalaryRecord, "id">) => void;
+  updateSalaryRecord: (id: number, patch: Partial<SalaryRecord>) => void;
+  deleteSalaryRecord: (id: number) => void;
+
+  /* HR - Leaves */
+  leaveRequests: LeaveRequest[];
+  addLeaveRequest:    (r: Omit<LeaveRequest, "id">) => void;
+  updateLeaveRequest: (id: number, patch: Partial<LeaveRequest>) => void;
+  deleteLeaveRequest: (id: number) => void;
+
+  /* HR - Advances */
+  advances: Advance[];
+  addAdvance:    (a: Omit<Advance, "id">) => void;
+  updateAdvance: (id: number, patch: Partial<Advance>) => void;
+  deleteAdvance: (id: number) => void;
+
+  /* HR - Absences */
+  absenceRecords: AbsenceRecord[];
+  addAbsenceRecord:    (r: Omit<AbsenceRecord, "id">) => void;
+  updateAbsenceRecord: (id: number, patch: Partial<AbsenceRecord>) => void;
+  deleteAbsenceRecord: (id: number) => void;
 }
 
 /* ═══════════════════════════════════════════════
@@ -169,6 +201,10 @@ export function DbProvider({ children }: { children: ReactNode }) {
   const tsk   = useEntityState<Task>(_tasks);
   const audit = useEntityState<AuditLog>(_auditLogs);
   const inv   = useEntityState<InventoryRow>(_inventory);
+  const sal   = useEntityState<SalaryRecord>(_salaryRecords);
+  const lv    = useEntityState<LeaveRequest>(_leaveRequests);
+  const adv   = useEntityState<Advance>(_advances);
+  const abs   = useEntityState<AbsenceRecord>(_absenceRecords);
 
   const value: DbCtx = {
     /* Warehouses */
@@ -252,6 +288,30 @@ export function DbProvider({ children }: { children: ReactNode }) {
     /* Inventory */
     inventory:       inv.list,
     updateInventory: inv.update,
+
+    /* HR - Salaries */
+    salaryRecords:      sal.list,
+    addSalaryRecord:    sal.add,
+    updateSalaryRecord: sal.update,
+    deleteSalaryRecord: sal.remove,
+
+    /* HR - Leaves */
+    leaveRequests:      lv.list,
+    addLeaveRequest:    lv.add,
+    updateLeaveRequest: lv.update,
+    deleteLeaveRequest: lv.remove,
+
+    /* HR - Advances */
+    advances:      adv.list,
+    addAdvance:    adv.add,
+    updateAdvance: adv.update,
+    deleteAdvance: adv.remove,
+
+    /* HR - Absences */
+    absenceRecords:      abs.list,
+    addAbsenceRecord:    abs.add,
+    updateAbsenceRecord: abs.update,
+    deleteAbsenceRecord: abs.remove,
   };
 
   return <DbContext.Provider value={value}>{children}</DbContext.Provider>;
