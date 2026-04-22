@@ -12,6 +12,8 @@ import { Reports } from "./pages/Reports";
 import { TodoList } from "./pages/TodoList";
 import { AuditLog } from "./pages/AuditLog";
 import { Settings } from "./pages/Settings";
+import AccountsPage from "./pages/AccountsPage";
+import CashierPage from "./pages/CashierPage";
 
 export const router = createHashRouter([
   {
@@ -36,6 +38,8 @@ export const router = createHashRouter([
       { path: "reports", Component: Reports },
       { path: "tasks", Component: TodoList },
       { path: "audit", Component: AuditLog },
+      { path: "accounts", Component: AccountsPage },
+      { path: "cashier", Component: CashierPage },
       { path: "settings", Component: Settings },
     ],
   },

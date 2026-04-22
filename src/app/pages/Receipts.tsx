@@ -9,6 +9,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { useDb } from "../context/DbContext";
 import { Wallet, Printer, Save, Search, X } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
@@ -27,14 +28,8 @@ export function Receipts() {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      <motion.div variants={anim} className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-          <Wallet className="w-5 h-5 text-blue-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">السندات والتحصيلات</h2>
-          <p className="text-sm text-gray-500">إدارة سندات القبض والصرف</p>
-        </div>
+      <motion.div variants={anim}>
+        <PageHeader icon={Wallet} title="السندات والتحصيلات" subtitle="إدارة سندات القبض والصرف" color="blue" />
       </motion.div>
 
       <motion.div variants={anim}>

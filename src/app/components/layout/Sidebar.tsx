@@ -4,7 +4,8 @@ import {
   LayoutDashboard, Warehouse, Package, Users, UserCheck,
   ArrowLeftRight, ClipboardList,
   BarChart3, CheckSquare, Shield, Settings,
-  ChevronRight, Snowflake, LogOut
+  ChevronRight, Snowflake, LogOut,
+  BookOpen, Landmark
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -21,6 +22,8 @@ const navItems = [
   { path: "/reports", label: "التقارير", icon: BarChart3 },
   { path: "/tasks", label: "قائمة المهام", icon: CheckSquare },
   { path: "/audit", label: "سجل التعديلات", icon: Shield },
+  { path: "/accounts", label: "الحسابات", icon: BookOpen },
+  { path: "/cashier", label: "الخزينة البنوك", icon: Landmark },
   { path: "/settings", label: "الإعدادات", icon: Settings },
 ];
 

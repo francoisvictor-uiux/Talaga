@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { useNavigate } from "react-router";
 import {
   Package,
   Percent,
@@ -147,6 +148,7 @@ function CustomBarChart({
 
 export function Dashboard() {
   const { transactions } = useDb();
+  const navigate = useNavigate();
   return (
     <motion.div
       variants={container}
@@ -317,7 +319,7 @@ export function Dashboard() {
               <CardTitle className="text-base font-semibold text-gray-800">
                 آخر الحركات
               </CardTitle>
-              <button className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
+              <button onClick={() => navigate("/movements")} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
                 <span>عرض الكل</span>
                 <ArrowLeft className="w-3 h-3" />
               </button>
@@ -341,9 +343,6 @@ export function Dashboard() {
                       </th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">
                         التاريخ
-                      </th>
-                      <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">
-                        الحالة
                       </th>
                     </tr>
                   </thead>
@@ -379,11 +378,6 @@ export function Dashboard() {
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
                           {tx.date}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700">
-                            {tx.status}
-                          </span>
                         </td>
                       </tr>
                     ))}

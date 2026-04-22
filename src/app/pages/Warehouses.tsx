@@ -17,7 +17,9 @@ import {
   Search,
   X,
   Eye,
+  Building2,
 } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { SearchToggle } from "../components/widgets/SearchToggle";
@@ -222,35 +224,21 @@ export function Warehouses() {
       className="space-y-5"
     >
       {/* ── Header ─────────────────────────────────────────────────── */}
-      <motion.div
-        variants={row}
-        className="flex items-center justify-between"
-      >
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">
-            الثلاجات
-          </h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            إجمالي {warehouses.length} ثلاجات — إشغال كلي{" "}
-            {overallPct}%
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <SearchToggle
-            view={view}
-            setView={setView}
-            search={search}
-            setSearch={setSearch}
-            placeholder="بحث باسم الثلاجة أو الحرف أو نوع الماكينة..."
-          />
-          <Button
-            onClick={() => setShowAddWH(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            إضافة ثلاجة
-          </Button>
-        </div>
+      <motion.div variants={row}>
+        <PageHeader
+          icon={Building2}
+          title="الثلاجات"
+          subtitle={`إجمالي ${warehouses.length} ثلاجات — إشغال كلي ${overallPct}%`}
+          color="cyan"
+          actions={
+            <>
+              <SearchToggle view={view} setView={setView} search={search} setSearch={setSearch} placeholder="بحث باسم الثلاجة أو الحرف أو نوع الماكينة..." />
+              <Button onClick={() => setShowAddWH(true)} className="gap-2">
+                <Plus className="w-4 h-4" />إضافة ثلاجة
+              </Button>
+            </>
+          }
+        />
       </motion.div>
 
       {/* ── Summary Cards ───────────────────────────────────────────── */}

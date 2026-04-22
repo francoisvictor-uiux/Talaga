@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { motion } from "motion/react";
 import {
   Plus, Search, Eye, Edit, Phone, X, DollarSign,
-  Camera, LayoutGrid, List, User, MapPin, FileText, Car, Trash2, Contact,
+  Camera, LayoutGrid, List, User, MapPin, FileText, Car, Trash2, Contact, Users,
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -10,6 +10,7 @@ import { Input } from "../components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
@@ -18,6 +19,7 @@ import { useDb } from "../context/DbContext";
 import { useTheme } from "../context/ThemeContext";
 
 import type { CustomerExt } from "../context/DbContext";
+import { PageHeader } from "../components/layout/PageHeader";
 
 type Customer        = ReturnType<typeof useDb>["customers"][0];
 type CustomerDriver  = ReturnType<typeof useDb>["customerDrivers"][0];
@@ -199,8 +201,8 @@ function CustomerCard({
 ══════════════════════════════════════════════════════════ */
 export function Customers() {
   const {
-    customers, customerDrivers, customerPricing, customerItems, customerContacts,
-    addCustomer, updateCustomer, updateCustomerItem, updateCustomerDriver,
+    customers, customerDrivers, customerPricing, customerItems, customerContacts, items,
+    addCustomer, updateCustomer, updateCustomerItem, addCustomerItem, deleteCustomerItem, updateCustomerDriver,
     addCustomerContact, updateCustomerContact, deleteCustomerContact,
   } = useDb();
   const { theme } = useTheme();
@@ -234,6 +236,16 @@ export function Customers() {
     code: "", name: "", phone: "", agent: "", address: "",
     taxNumber: "", defaultNaulage: "", notes: "", image: "",
   });
+  const [newContacts, setNewContacts] = useState<{name: string; phone: string; role: string}[]>([]);
+  const [newContactForm, setNewContactForm] = useState({ name: "", phone: "", role: "" });
+
+  /* ── Add Naulage (Add Dialog) ── */
+  const [newNaulages, setNewNaulages] = useState<{itemName: string; naulage: string}[]>([]);
+  const [newNaulageForm, setNewNaulageForm] = useState({ itemName: "", naulage: "" });
+
+  /* ── Add Naulage (View Dialog) ── */
+  const [showAddNaulage, setShowAddNaulage] = useState(false);
+  const [addNaulageForm, setAddNaulageForm] = useState({ itemName: "", naulage: "" });
 
   const filtered = customers.filter(c =>
     c.name.includes(search) || c.code.includes(search) || c.phone.includes(search)
@@ -244,6 +256,7 @@ export function Customers() {
   /* ── Handlers ── */
   const handleSave = () => {
     if (!newCustomer.name) { toast.error("يرجى إدخال اسم العميل"); return; }
+    const newId = customers.length ? Math.max(...customers.map(c => c.id)) + 1 : 1;
     addCustomer({
       code: newCustomer.code || `C${String(customers.length + 1).padStart(3, "0")}`,
       name: newCustomer.name,
@@ -257,9 +270,18 @@ export function Customers() {
       balance: 0,
       itemsStored: 0,
     });
-    toast.success(`تم إضافة العميل "${newCustomer.name}" بنجاح`);
+    newContacts.forEach(ct => addCustomerContact({ ...ct, customerId: newId }));
+    newNaulages.forEach(n => addCustomerItem({ customerId: newId, itemName: n.itemName, naulage: Number(n.naulage) || 0 }));
+    const parts = [];
+    if (newContacts.length) parts.push(`${newContacts.length} جهة اتصال`);
+    if (newNaulages.length) parts.push(`${newNaulages.length} نولون`);
+    toast.success(`تم إضافة العميل "${newCustomer.name}" بنجاح${parts.length ? ` مع ${parts.join(" و ")}` : ""}`);
     setShowAdd(false);
     setNewCustomer({ code: "", name: "", phone: "", agent: "", address: "", taxNumber: "", defaultNaulage: "", notes: "", image: "" });
+    setNewContacts([]);
+    setNewContactForm({ name: "", phone: "", role: "" });
+    setNewNaulages([]);
+    setNewNaulageForm({ itemName: "", naulage: "" });
   };
 
   const openEditCustomer = (c: CustomerExt) => {
@@ -358,18 +380,18 @@ export function Customers() {
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
 
       {/* ── Header ── */}
-      <motion.div variants={anim} className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">إدارة العملاء</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{customers.length} عملاء مسجلين</p>
-        </div>
-        <Button
-          onClick={() => setShowAdd(true)}
-          className="text-white gap-2"
-          style={{ background: theme.primary }}
-        >
-          <Plus className="w-4 h-4" />إضافة عميل
-        </Button>
+      <motion.div variants={anim}>
+        <PageHeader
+          icon={Users}
+          title="إدارة العملاء"
+          subtitle={`${customers.length} عملاء مسجلين`}
+          color="emerald"
+          actions={
+            <Button onClick={() => setShowAdd(true)} className="text-white gap-2" style={{ background: theme.primary }}>
+              <Plus className="w-4 h-4" />إضافة عميل
+            </Button>
+          }
+        />
       </motion.div>
 
       {/* ── Toolbar ── */}
@@ -515,7 +537,7 @@ export function Customers() {
 
       {/* ══════════ Customer Detail Dialog ══════════ */}
       <Dialog open={!!selectedCustomer} onOpenChange={() => setSelectedCustomer(null)}>
-        <DialogContent className="max-w-3xl w-full max-h-[90vh] overflow-y-auto p-0" dir="rtl">
+        <DialogContent className="max-w-3xl w-full p-0" dir="rtl">
           {selectedCustomer && (
             <>
               {/* Hero header */}
@@ -686,19 +708,27 @@ export function Customers() {
                       </div>
                       {customerItems.filter(ci => ci.customerId === selectedCustomer.id).length > 0 ? (
                         <table className="w-full text-sm">
-                          <thead><tr className="bg-amber-50 rounded"><th className="text-right p-2.5 text-xs text-gray-500">الصنف</th><th className="text-right p-2.5 text-xs text-gray-500">النولون (ج.م/طرد)</th><th className="text-right p-2.5 text-xs text-gray-500">إجراء</th></tr></thead>
+                          <thead>
+                            <tr className="bg-amber-50 rounded">
+                              <th className="text-right p-2.5 text-xs text-gray-500">الصنف</th>
+                              <th className="text-right p-2.5 text-xs text-gray-500">النولون (ج.م/طرد)</th>
+                              <th className="text-right p-2.5 text-xs text-gray-500">إجراء</th>
+                            </tr>
+                          </thead>
                           <tbody>
                             {customerItems.filter(ci => ci.customerId === selectedCustomer.id).map(ci => (
-                              <tr key={ci.id} className="border-b">
+                              <tr key={ci.id} className="border-b hover:bg-gray-50/50">
                                 <td className="p-2.5 font-medium">{ci.itemName}</td>
                                 <td className="p-2.5"><span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">{ci.naulage} ج.م</span></td>
                                 <td className="p-2.5">
-                                  <button
-                                    className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                    onClick={() => openEditNaulage(ci)}
-                                  >
-                                    <Edit className="w-3.5 h-3.5" />
-                                  </button>
+                                  <div className="flex items-center gap-1">
+                                    <button className="p-1 text-blue-600 hover:bg-blue-50 rounded" onClick={() => openEditNaulage(ci)}>
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button className="p-1 text-red-400 hover:bg-red-50 rounded" onClick={() => { deleteCustomerItem(ci.id); toast.success(`تم حذف نولون "${ci.itemName}"`); }}>
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -707,9 +737,66 @@ export function Customers() {
                       ) : (
                         <p className="text-sm text-gray-500 text-center py-8 bg-gray-50 rounded-xl">لا توجد نولونات خاصة — يُطبق النولون الافتراضي</p>
                       )}
-                      <button className="flex items-center gap-1.5 text-blue-600 hover:bg-blue-50 text-sm font-medium px-3 py-2 rounded-xl border border-dashed border-blue-300 w-full justify-center">
-                        <Plus className="w-3.5 h-3.5" />إضافة نولون لصنف جديد
-                      </button>
+
+                      {/* Add naulage inline form */}
+                      {showAddNaulage ? (
+                        <div className="border border-dashed border-amber-300 rounded-xl p-4 bg-amber-50/30 space-y-3">
+                          <p className="text-xs font-semibold text-amber-700">إضافة نولون لصنف جديد</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-xs">الصنف *</Label>
+                              <Select
+                                value={addNaulageForm.itemName}
+                                onValueChange={v => setAddNaulageForm({ ...addNaulageForm, itemName: v })}
+                              >
+                                <SelectTrigger dir="rtl"><SelectValue placeholder="اختر صنف" /></SelectTrigger>
+                                <SelectContent dir="rtl">
+                                  {items.map(item => (
+                                    <SelectItem key={item.id} value={item.name}>{item.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">النولون (ج.م/طرد) *</Label>
+                              <Input
+                                type="number" dir="rtl" placeholder="0"
+                                value={addNaulageForm.naulage}
+                                onChange={e => setAddNaulageForm({ ...addNaulageForm, naulage: e.target.value })}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                if (!selectedCustomer) return;
+                                if (!addNaulageForm.itemName || !addNaulageForm.naulage) { toast.error("الصنف والنولون مطلوبان"); return; }
+                                if (customerItems.some(ci => ci.customerId === selectedCustomer.id && ci.itemName === addNaulageForm.itemName)) { toast.error("هذا الصنف مضاف بالفعل"); return; }
+                                addCustomerItem({ customerId: selectedCustomer.id, itemName: addNaulageForm.itemName, naulage: Number(addNaulageForm.naulage) || 0 });
+                                toast.success(`تم إضافة نولون "${addNaulageForm.itemName}"`);
+                                setAddNaulageForm({ itemName: "", naulage: "" });
+                                setShowAddNaulage(false);
+                              }}
+                              className="flex-1 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 transition-colors font-medium"
+                            >
+                              حفظ
+                            </button>
+                            <button
+                              onClick={() => { setShowAddNaulage(false); setAddNaulageForm({ itemName: "", naulage: "" }); }}
+                              className="px-4 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                              إلغاء
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setShowAddNaulage(true)}
+                          className="flex items-center gap-1.5 text-amber-700 hover:bg-amber-50 text-sm font-medium px-3 py-2 rounded-xl border border-dashed border-amber-300 w-full justify-center mt-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" />إضافة نولون لصنف جديد
+                        </button>
+                      )}
                     </div>
                   </TabsContent>
 
@@ -786,60 +873,169 @@ export function Customers() {
       </Dialog>
 
       {/* ══════════ Add Customer Dialog ══════════ */}
-      <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent dir="rtl" className="max-w-lg bg-white">
+      <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) { setNewContacts([]); setNewContactForm({ name: "", phone: "", role: "" }); setNewNaulages([]); setNewNaulageForm({ itemName: "", naulage: "" }); } }}>
+        <DialogContent dir="rtl" className="max-w-xl bg-white">
           <DialogHeader><DialogTitle>إضافة عميل جديد</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-1">
-            <ImageUploader
-              label="صورة العميل"
-              value={newCustomer.image}
-              onChange={v => setNewCustomer({ ...newCustomer, image: v })}
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>كود العميل</Label>
-                <Input placeholder="C007" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
-                  value={newCustomer.code} onChange={e => setNewCustomer({ ...newCustomer, code: e.target.value })} />
+
+          <Tabs defaultValue="basic" dir="rtl" className="mt-1">
+            <TabsList className="w-full">
+              <TabsTrigger value="basic" className="flex-1">البيانات الأساسية</TabsTrigger>
+              <TabsTrigger value="naulage" className="flex-1">
+                النولون
+                {newNaulages.length > 0 && <span className="mr-1.5 bg-amber-600 text-white text-[10px] rounded-full w-4 h-4 inline-flex items-center justify-center">{newNaulages.length}</span>}
+              </TabsTrigger>
+              <TabsTrigger value="contacts" className="flex-1">
+                جهات الاتصال
+                {newContacts.length > 0 && <span className="mr-1.5 bg-blue-600 text-white text-[10px] rounded-full w-4 h-4 inline-flex items-center justify-center">{newContacts.length}</span>}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* ── البيانات الأساسية ── */}
+            <TabsContent value="basic" className="space-y-4 pt-3">
+              <ImageUploader label="صورة العميل" value={newCustomer.image} onChange={v => setNewCustomer({ ...newCustomer, image: v })} />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>كود العميل</Label>
+                  <Input placeholder="C007" dir="rtl" value={newCustomer.code} onChange={e => setNewCustomer({ ...newCustomer, code: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>اسم العميل <span className="text-red-500">*</span></Label>
+                  <Input placeholder="اسم الشركة أو المؤسسة" dir="rtl" value={newCustomer.name} onChange={e => setNewCustomer({ ...newCustomer, name: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>رقم الهاتف</Label>
+                  <Input placeholder="01XXXXXXXXX" dir="rtl" value={newCustomer.phone} onChange={e => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>المندوب</Label>
+                  <Input placeholder="اسم المندوب" dir="rtl" value={newCustomer.agent} onChange={e => setNewCustomer({ ...newCustomer, agent: e.target.value })} />
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label>العنوان</Label>
+                  <Input placeholder="المحافظة - الحي" dir="rtl" value={newCustomer.address} onChange={e => setNewCustomer({ ...newCustomer, address: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>الرقم الضريبي</Label>
+                  <Input placeholder="XXXXXXXXX" dir="rtl" value={newCustomer.taxNumber} onChange={e => setNewCustomer({ ...newCustomer, taxNumber: e.target.value })} />
+                </div>
+                <div className="col-span-2 space-y-1.5">
+                  <Label>ملاحظات</Label>
+                  <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none" rows={2} value={newCustomer.notes} onChange={e => setNewCustomer({ ...newCustomer, notes: e.target.value })} />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>اسم العميل <span className="text-red-500">*</span></Label>
-                <Input placeholder="اسم الشركة أو المؤسسة" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
-                  value={newCustomer.name} onChange={e => setNewCustomer({ ...newCustomer, name: e.target.value })} />
+            </TabsContent>
+
+            {/* ── النولون ── */}
+            <TabsContent value="naulage" className="pt-3 space-y-4">
+              {/* Item-specific Naulages */}
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700">نولون لكل صنف</p>
+
+                {newNaulages.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-3 bg-gray-50 rounded-xl">لا توجد نولونات خاصة — يُطبق النولون الافتراضي</p>
+                )}
+                {newNaulages.map((n, i) => (
+                  <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-800">{n.itemName}</span>
+                      <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-xs font-semibold">{n.naulage} ج.م / طرد</span>
+                    </div>
+                    <button onClick={() => setNewNaulages(prev => prev.filter((_, j) => j !== i))} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Add form */}
+                <div className="border border-dashed border-amber-200 rounded-xl p-3 space-y-3 bg-amber-50/30">
+                  <p className="text-xs font-semibold text-amber-700">إضافة نولون لصنف</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">الصنف *</Label>
+                      <Select
+                        value={newNaulageForm.itemName}
+                        onValueChange={v => setNewNaulageForm({ ...newNaulageForm, itemName: v })}
+                      >
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="اختر صنف" /></SelectTrigger>
+                        <SelectContent dir="rtl">
+                          {items.map(item => (
+                            <SelectItem key={item.id} value={item.name}>{item.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">النولون (ج.م/طرد) *</Label>
+                      <Input
+                        type="number" placeholder="0" dir="rtl"
+                        value={newNaulageForm.naulage}
+                        onChange={e => setNewNaulageForm({ ...newNaulageForm, naulage: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="w-full gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
+                    onClick={() => {
+                      if (!newNaulageForm.itemName || !newNaulageForm.naulage) { toast.error("الصنف والنولون مطلوبان"); return; }
+                      if (newNaulages.some(n => n.itemName === newNaulageForm.itemName)) { toast.error("هذا الصنف مضاف بالفعل"); return; }
+                      setNewNaulages(prev => [...prev, { ...newNaulageForm }]);
+                      setNewNaulageForm({ itemName: "", naulage: "" });
+                    }}
+                  >
+                    <Plus className="w-3.5 h-3.5" />إضافة
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>رقم الهاتف</Label>
-                <Input placeholder="01XXXXXXXXX" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
-                  value={newCustomer.phone} onChange={e => setNewCustomer({ ...newCustomer, phone: e.target.value })} />
+            </TabsContent>
+
+            {/* ── جهات الاتصال ── */}
+            <TabsContent value="contacts" className="pt-3 space-y-3">
+              {newContacts.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-4">لا توجد جهات اتصال بعد</p>
+              )}
+              {newContacts.map((ct, i) => (
+                <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+                  <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-xs text-purple-700 font-bold flex-shrink-0">{ct.name.charAt(0)}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800">{ct.name}</p>
+                    <p className="text-xs text-gray-500">{ct.phone}{ct.role ? ` · ${ct.role}` : ""}</p>
+                  </div>
+                  <button onClick={() => setNewContacts(prev => prev.filter((_, j) => j !== i))} className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+
+              <div className="border border-dashed border-purple-200 rounded-xl p-3 space-y-3 bg-purple-50/30">
+                <p className="text-xs font-semibold text-purple-700">إضافة جهة اتصال</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">الاسم *</Label>
+                    <Input placeholder="اسم جهة الاتصال" dir="rtl" value={newContactForm.name} onChange={e => setNewContactForm({ ...newContactForm, name: e.target.value })} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">الهاتف *</Label>
+                    <Input placeholder="01XXXXXXXXX" dir="rtl" value={newContactForm.phone} onChange={e => setNewContactForm({ ...newContactForm, phone: e.target.value })} />
+                  </div>
+                  <div className="col-span-2 space-y-1">
+                    <Label className="text-xs">الوظيفة / الصفة</Label>
+                    <Input placeholder="مثال: مدير المشتريات" dir="rtl" value={newContactForm.role} onChange={e => setNewContactForm({ ...newContactForm, role: e.target.value })} />
+                  </div>
+                </div>
+                <Button size="sm" className="w-full gap-1.5" onClick={() => {
+                  if (!newContactForm.name || !newContactForm.phone) { toast.error("الاسم والهاتف مطلوبان"); return; }
+                  setNewContacts(prev => [...prev, { ...newContactForm }]);
+                  setNewContactForm({ name: "", phone: "", role: "" });
+                }}>
+                  <Plus className="w-3.5 h-3.5" />إضافة جهة الاتصال
+                </Button>
               </div>
-              <div className="space-y-1.5">
-                <Label>المندوب</Label>
-                <Input placeholder="اسم المندوب" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
-                  value={newCustomer.agent} onChange={e => setNewCustomer({ ...newCustomer, agent: e.target.value })} />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label>العنوان</Label>
-                <Input placeholder="المحافظة - الحي" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
-                  value={newCustomer.address} onChange={e => setNewCustomer({ ...newCustomer, address: e.target.value })} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>الرقم الضريبي</Label>
-                <Input placeholder="XXXXXXXXX" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
-                  value={newCustomer.taxNumber} onChange={e => setNewCustomer({ ...newCustomer, taxNumber: e.target.value })} />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="flex items-center gap-1.5"><DollarSign className="w-3.5 h-3.5 text-amber-600" />النولون الافتراضي (ج.م/طرد)</Label>
-                <Input type="number" placeholder="0" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
-                  value={newCustomer.defaultNaulage} onChange={e => setNewCustomer({ ...newCustomer, defaultNaulage: e.target.value })} />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label>ملاحظات</Label>
-                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none border border-[#d1d5dc] bg-[#f9fafb]" rows={2}
-                  value={newCustomer.notes} onChange={e => setNewCustomer({ ...newCustomer, notes: e.target.value })} />
-              </div>
-            </div>
-          </div>
+            </TabsContent>
+          </Tabs>
+
           <DialogFooter className="gap-2 justify-end mt-2">
-            <Button onClick={handleSave} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ</Button>
+            <Button onClick={handleSave}>حفظ العميل</Button>
             <Button variant="outline" onClick={() => setShowAdd(false)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>

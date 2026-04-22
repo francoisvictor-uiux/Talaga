@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Plus, Eye, Edit, Shield, List, LayoutGrid, Search, X, Phone, Mail, DollarSign } from "lucide-react";
+import { Plus, Eye, Edit, Shield, List, LayoutGrid, Search, X, Phone, Mail, DollarSign, Users } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -30,7 +31,7 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 const cardItem = { hidden: { opacity: 0, scale: 0.95 }, show: { opacity: 1, scale: 1 } };
 
 export function Employees() {
-  const { employees, updateEmployee } = useDb();
+  const { employees, addEmployee, updateEmployee } = useDb();
   const [view, setView] = useState<"grid" | "list">("grid");
   const [showPerms, setShowPerms] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -40,6 +41,7 @@ export function Employees() {
   const [viewTarget, setViewTarget] = useState<Employee | null>(null);
   const [editTarget, setEditTarget] = useState<Employee | null>(null);
   const [editForm, setEditForm] = useState({ name: "", role: "", phone: "", email: "", salary: "" });
+  const [newForm, setNewForm] = useState({ name: "", role: "", status: "active", phone: "", email: "", salary: "" });
   const [search, setSearch] = useState("");
 
   const filtered = employees.filter(e =>
@@ -79,25 +81,28 @@ export function Employees() {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      {/* Header */}
-      <motion.div variants={cardItem} className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">الموظفون</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{employees.length} موظفين مسجلين</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white">
-            <button onClick={() => setView("grid")} className={cn("p-2 transition-colors", view === "grid" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50")}>
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button onClick={() => setView("list")} className={cn("p-2 transition-colors", view === "list" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50")}>
-              <List className="w-4 h-4" />
-            </button>
-          </div>
-          <Button onClick={() => setShowAdd(true)} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
-            <Plus className="w-4 h-4" />إضافة موظف
-          </Button>
-        </div>
+      <motion.div variants={cardItem}>
+        <PageHeader
+          icon={Users}
+          title="الموظفون"
+          subtitle={`${employees.length} موظفين مسجلين`}
+          color="gray"
+          actions={
+            <>
+              <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white">
+                <button onClick={() => setView("grid")} className={cn("p-2 transition-colors", view === "grid" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50")}>
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button onClick={() => setView("list")} className={cn("p-2 transition-colors", view === "list" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-50")}>
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
+              <Button onClick={() => setShowAdd(true)} className="gap-2">
+                <Plus className="w-4 h-4" />إضافة موظف
+              </Button>
+            </>
+          }
+        />
       </motion.div>
 
       {/* Search */}
@@ -350,15 +355,18 @@ export function Employees() {
       </Dialog>
 
       {/* Add Employee Dialog */}
-      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+      <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) setNewForm({ name: "", role: "", status: "active", phone: "", email: "", salary: "" }); }}>
         <DialogContent dir="rtl" className="max-w-lg bg-white">
           <DialogHeader><DialogTitle>إضافة موظف جديد</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2 space-y-1.5"><Label>الاسم الكامل <span className="text-red-500">*</span></Label><Input dir="rtl" placeholder="الاسم الكامل للموظف" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
+            <div className="col-span-2 space-y-1.5">
+              <Label>الاسم الكامل <span className="text-red-500">*</span></Label>
+              <Input dir="rtl" placeholder="الاسم الكامل للموظف" value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} />
+            </div>
             <div className="space-y-1.5">
               <Label>الدور الوظيفي <span className="text-red-500">*</span></Label>
-              <Select>
-                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
+              <Select value={newForm.role} onValueChange={v => setNewForm({ ...newForm, role: v })}>
+                <SelectTrigger dir="rtl"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
                 <SelectContent dir="rtl">
                   <SelectItem value="مدير">مدير</SelectItem>
                   <SelectItem value="محاسب">محاسب</SelectItem>
@@ -368,20 +376,43 @@ export function Employees() {
             </div>
             <div className="space-y-1.5">
               <Label>حالة الموظف</Label>
-              <Select defaultValue="active">
-                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue /></SelectTrigger>
+              <Select value={newForm.status} onValueChange={v => setNewForm({ ...newForm, status: v })}>
+                <SelectTrigger dir="rtl"><SelectValue /></SelectTrigger>
                 <SelectContent dir="rtl">
                   <SelectItem value="active">نشط</SelectItem>
                   <SelectItem value="inactive">غير نشط</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5"><Label>رقم الهاتف</Label><Input dir="rtl" placeholder="01XXXXXXXXX" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
-            <div className="space-y-1.5"><Label>البريد الإلكتروني</Label><Input dir="rtl" type="email" placeholder="example@coldstorage.eg" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
-            <div className="space-y-1.5"><Label>الراتب (ج.م)</Label><Input dir="rtl" type="number" placeholder="0" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
+            <div className="space-y-1.5">
+              <Label>رقم الهاتف</Label>
+              <Input dir="rtl" placeholder="01XXXXXXXXX" value={newForm.phone} onChange={e => setNewForm({ ...newForm, phone: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>البريد الإلكتروني</Label>
+              <Input dir="rtl" type="email" placeholder="example@coldstorage.eg" value={newForm.email} onChange={e => setNewForm({ ...newForm, email: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>الراتب (ج.م)</Label>
+              <Input dir="rtl" type="number" placeholder="0" value={newForm.salary} onChange={e => setNewForm({ ...newForm, salary: e.target.value })} />
+            </div>
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
-            <Button onClick={() => { toast.success("تم إضافة الموظف بنجاح"); setShowAdd(false); }} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ</Button>
+            <Button onClick={() => {
+              if (!newForm.name || !newForm.role) { toast.error("يرجى إدخال الاسم والدور الوظيفي"); return; }
+              addEmployee({
+                name: newForm.name,
+                role: newForm.role,
+                status: newForm.status,
+                phone: newForm.phone,
+                email: newForm.email,
+                salary: Number(newForm.salary) || 0,
+                joinDate: new Date().toISOString().split("T")[0],
+              });
+              toast.success(`تم إضافة الموظف "${newForm.name}" بنجاح`);
+              setShowAdd(false);
+              setNewForm({ name: "", role: "", status: "active", phone: "", email: "", salary: "" });
+            }}>حفظ</Button>
             <Button variant="outline" onClick={() => setShowAdd(false)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>

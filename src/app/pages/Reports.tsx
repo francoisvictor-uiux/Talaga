@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { BarChart3, Play, Download, Printer, FileText, TrendingUp, Package, Wallet, Users, ChevronLeft } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -66,15 +67,8 @@ export function Reports() {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      {/* Header */}
-      <motion.div variants={anim} className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
-          <BarChart3 className="w-5 h-5 text-blue-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">التقارير</h2>
-          <p className="text-sm text-gray-500">تقارير مالية وتشغيلية شاملة</p>
-        </div>
+      <motion.div variants={anim}>
+        <PageHeader icon={BarChart3} title="التقارير" subtitle="تقارير مالية وتشغيلية شاملة" color="indigo" />
       </motion.div>
 
       {/* Breadcrumb */}

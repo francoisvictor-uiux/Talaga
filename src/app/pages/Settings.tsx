@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { motion } from "motion/react";
 import { Settings as SettingsIcon, Building2, Printer, Shield, Database, Palette, Save, Upload, MessageCircle, Check } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -86,15 +87,8 @@ export function Settings() {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      {/* Header */}
-      <motion.div variants={anim} className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
-          <SettingsIcon className="w-5 h-5 text-gray-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">الإعدادات</h2>
-          <p className="text-sm text-gray-500">إعدادات النظام وبيانات الشركة</p>
-        </div>
+      <motion.div variants={anim}>
+        <PageHeader icon={SettingsIcon} title="الإعدادات" subtitle="إعدادات النظام وبيانات الشركة" color="gray" />
       </motion.div>
 
       <motion.div variants={anim} className="flex gap-5">

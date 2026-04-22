@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { Shield, Search, ChevronDown } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -36,15 +37,8 @@ export function AuditLog() {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      {/* Header */}
-      <motion.div variants={anim} className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center">
-          <Shield className="w-5 h-5 text-slate-600" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">سجل التعديلات</h2>
-          <p className="text-sm text-gray-500">سجل قراءة فقط — لا يمكن التعديل أو الحذف</p>
-        </div>
+      <motion.div variants={anim}>
+        <PageHeader icon={Shield} title="سجل التعديلات" subtitle="سجل قراءة فقط — لا يمكن التعديل أو الحذف" color="slate" />
       </motion.div>
 
       {/* Notice Banner */}

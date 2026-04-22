@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Plus, CheckSquare, Circle, Clock, User, Search, X } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -79,15 +80,18 @@ export function TodoList() {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      {/* Header */}
-      <motion.div variants={anim} className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">قائمة المهام</h2>
-          <p className="text-sm text-gray-500">{pending.length} مهمة معلقة، {completed.length} مكتملة</p>
-        </div>
-        <Button onClick={() => setShowAdd(true)} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
-          <Plus className="w-4 h-4" />إضافة مهمة
-        </Button>
+      <motion.div variants={anim}>
+        <PageHeader
+          icon={CheckSquare}
+          title="قائمة المهام"
+          subtitle={`${pending.length} مهمة معلقة، ${completed.length} مكتملة`}
+          color="pink"
+          actions={
+            <Button onClick={() => setShowAdd(true)} className="gap-2">
+              <Plus className="w-4 h-4" />إضافة مهمة
+            </Button>
+          }
+        />
       </motion.div>
 
       {/* Summary */}

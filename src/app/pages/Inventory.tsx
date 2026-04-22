@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion } from "motion/react";
 import { ClipboardList, Filter, Play, AlertTriangle, CheckCircle, TrendingUp, Search, X } from "lucide-react";
+import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -48,15 +49,18 @@ export function Inventory() {
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      {/* Header */}
-      <motion.div variants={anim} className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-gray-800">الجرد والتسويات</h2>
-          <p className="text-sm text-gray-500">آخر جرد: يناير 2024</p>
-        </div>
-        <Button onClick={() => toast.info("جاري تحضير نموذج الجرد...")} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
-          <Play className="w-4 h-4" />بدء جرد جديد
-        </Button>
+      <motion.div variants={anim}>
+        <PageHeader
+          icon={ClipboardList}
+          title="الجرد والتسويات"
+          subtitle="آخر جرد: يناير 2024"
+          color="amber"
+          actions={
+            <Button onClick={() => toast.info("جاري تحضير نموذج الجرد...")} className="gap-2">
+              <Play className="w-4 h-4" />بدء جرد جديد
+            </Button>
+          }
+        />
       </motion.div>
 
       {/* Summary Cards */}
