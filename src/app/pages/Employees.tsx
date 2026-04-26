@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
-  Plus, Eye, Edit, Shield, List, LayoutGrid, Search, X,
+  Plus, Eye, EyeOff, Edit, Shield, List, LayoutGrid, Search, X,
   Phone, Mail, DollarSign, CheckCircle2, XCircle, Clock,
   AlertCircle, Banknote, Calendar, TrendingUp, Users
 } from "lucide-react";
@@ -18,18 +18,31 @@ import { Textarea } from "../components/ui/textarea";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
-import { useDb } from "../context/DbContext";
+import { getAllEmployees, addEmployeeRequest, editEmployeeRequest, type BackendEmployee } from "../services/employeeService";
+import { getJobTitlesDDL, type JobTitleOption } from "../services/jobTitleService";
+import {
+  getSalaries, addSalary, markSalaryPaid, addSalaryBonus, type BackendSalary,
+  getLeaves, addLeave, setLeaveStatus, type BackendLeave,
+  getAdvances, addAdvance, type BackendAdvance,
+  getAbsences, addAbsence, type BackendAbsence,
+} from "../services/hrService";
 
-type Employee = ReturnType<typeof useDb>["employees"][0];
-type SalaryRecord = ReturnType<typeof useDb>["salaryRecords"][0];
-type LeaveRequest = ReturnType<typeof useDb>["leaveRequests"][0];
-type Advance = ReturnType<typeof useDb>["advances"][0];
-type AbsenceRecord = ReturnType<typeof useDb>["absenceRecords"][0];
+const ROLE_OPTIONS = [
+  { code: "Admin",      label: "مدير النظام" },
+  { code: "Manager",    label: "مدير" },
+  { code: "Warehouse",  label: "عامل مخزن" },
+  { code: "Accountant", label: "محاسب" },
+  { code: "Viewer",     label: "مشاهدة فقط" },
+];
+
+type EmployeeMini = { id: string; name: string };
 
 const roleColors: Record<string, string> = {
+  "مدير النظام": "bg-red-100 text-red-700 border-red-200",
   "مدير": "bg-purple-100 text-purple-700 border-purple-200",
   "محاسب": "bg-blue-100 text-blue-700 border-blue-200",
   "عامل مخزن": "bg-green-100 text-green-700 border-green-200",
+  "مشاهدة فقط": "bg-gray-100 text-gray-700 border-gray-200",
 };
 
 const permModules = ["المخازن", "الأصناف", "العملاء", "الوارد", "المنصرف", "التحويلات", "الجرد", "السندات", "التقارير", "الإعدادات"];
@@ -41,86 +54,99 @@ const cardItem = { hidden: { opacity: 0, scale: 0.95 }, show: { opacity: 1, scal
 /* ──────────────────────────────────────────
    SALARIES TAB
 ────────────────────────────────────────── */
-function SalariesTab() {
-  const { employees, salaryRecords, addSalaryRecord, updateSalaryRecord } = useDb();
-  const [filterMonth, setFilterMonth] = useState("2024-02");
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
+  const [filterMonth, setFilterMonth] = useState(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [rows, setRows] = useState<BackendSalary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBulkPay, setShowBulkPay] = useState(false);
   const [showBulkBonus, setShowBulkBonus] = useState(false);
   const [bonusAmount, setBonusAmount] = useState("");
   const [showAddSalary, setShowAddSalary] = useState(false);
   const [addForm, setAddForm] = useState({ employeeId: "", month: "", baseSalary: "", bonus: "0", deductions: "0", notes: "" });
 
-  const monthRecords = salaryRecords.filter(r => r.month === filterMonth);
-  const pendingRecords = monthRecords.filter(r => r.status === "معلق");
+  const [year, month] = filterMonth.split("-").map(Number);
 
-  const totalPaid = monthRecords.reduce((s, r) => s + (r.status === "مدفوع" ? r.netSalary : 0), 0);
-  const totalPending = pendingRecords.reduce((s, r) => s + r.netSalary, 0);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await getSalaries(year, month);
+      setRows(list);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل تحميل المرتبات");
+    } finally { setLoading(false); }
+  }, [year, month]);
 
-  const getName = (id: number) => employees.find(e => e.id === id)?.name ?? `موظف #${id}`;
+  useEffect(() => { load(); }, [load]);
 
-  const toggleSelect = (id: number) =>
+  const pendingRows = rows.filter(r => r.status === "معلق");
+  const totalPaid = rows.reduce((s, r) => s + (r.status === "مدفوع" ? r.netSalary : 0), 0);
+  const totalPending = pendingRows.reduce((s, r) => s + r.netSalary, 0);
+
+  const toggleSelect = (id: string) =>
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const toggleAll = () => {
-    const pendingIds = pendingRecords.map(r => r.id);
-    setSelectedIds(prev => pendingIds.every(id => prev.includes(id)) ? [] : pendingIds);
+    const ids = pendingRows.map(r => r.id);
+    setSelectedIds(prev => ids.every(id => prev.includes(id)) ? [] : ids);
   };
 
-  const handleBulkPay = () => {
-    selectedIds.forEach(id => {
-      updateSalaryRecord(id, { status: "مدفوع", paidDate: new Date().toISOString().slice(0, 10) });
-    });
-    toast.success(`تم صرف ${selectedIds.length} راتب بنجاح`);
-    setSelectedIds([]);
-    setShowBulkPay(false);
+  const handleBulkPay = async () => {
+    try {
+      await Promise.all(selectedIds.map(id => markSalaryPaid(id)));
+      toast.success(`تم صرف ${selectedIds.length} راتب بنجاح`);
+      setSelectedIds([]); setShowBulkPay(false);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل صرف المرتبات");
+    }
   };
 
-  const handleBulkBonus = () => {
+  const handleBulkBonus = async () => {
     const amount = Number(bonusAmount);
     if (!amount || amount <= 0) { toast.error("أدخل مبلغ صحيح"); return; }
-    selectedIds.forEach(id => {
-      const rec = salaryRecords.find(r => r.id === id);
-      if (rec) updateSalaryRecord(id, { bonus: rec.bonus + amount, netSalary: rec.netSalary + amount });
-    });
-    toast.success(`تمت إضافة إكرامية ${amount.toLocaleString()} ج.م لـ ${selectedIds.length} موظفين`);
-    setBonusAmount("");
-    setSelectedIds([]);
-    setShowBulkBonus(false);
+    try {
+      await Promise.all(selectedIds.map(id => addSalaryBonus(id, amount)));
+      toast.success(`تمت إضافة إكرامية ${amount.toLocaleString()} ج.م لـ ${selectedIds.length} موظفين`);
+      setBonusAmount(""); setSelectedIds([]); setShowBulkBonus(false);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل إضافة الإكرامية");
+    }
   };
 
-  const handleAddSalary = () => {
-    if (!addForm.employeeId || !addForm.month || !addForm.baseSalary) {
-      toast.error("يرجى تعبئة الحقول الإلزامية"); return;
+  const handleAddSalary = async () => {
+    if (!addForm.employeeId || !addForm.month || !addForm.baseSalary) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
+    const [y, m] = addForm.month.split("-").map(Number);
+    try {
+      await addSalary({
+        employeeId: addForm.employeeId,
+        year: y, month: m,
+        baseSalary: Number(addForm.baseSalary),
+        bonuses: Number(addForm.bonus) || 0,
+        deductions: Number(addForm.deductions) || 0,
+        notes: addForm.notes || undefined,
+      });
+      toast.success("تمت إضافة سجل الراتب");
+      setShowAddSalary(false);
+      setAddForm({ employeeId: "", month: "", baseSalary: "", bonus: "0", deductions: "0", notes: "" });
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل إضافة المرتب");
     }
-    const base = Number(addForm.baseSalary);
-    const bonus = Number(addForm.bonus) || 0;
-    const deductions = Number(addForm.deductions) || 0;
-    addSalaryRecord({
-      employeeId: Number(addForm.employeeId),
-      month: addForm.month,
-      baseSalary: base,
-      bonus,
-      deductions,
-      netSalary: base + bonus - deductions,
-      status: "معلق",
-      paidDate: "",
-      notes: addForm.notes,
-    });
-    toast.success("تمت إضافة سجل الراتب");
-    setShowAddSalary(false);
-    setAddForm({ employeeId: "", month: "", baseSalary: "", bonus: "0", deductions: "0", notes: "" });
   };
 
   return (
     <div className="space-y-4">
-      {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: "إجمالي المدفوع", value: `${totalPaid.toLocaleString()} ج.م`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
           { label: "في الانتظار", value: `${totalPending.toLocaleString()} ج.م`, icon: Clock, color: "text-orange-600", bg: "bg-orange-50" },
-          { label: "عدد السجلات", value: monthRecords.length, icon: Users, color: "text-blue-600", bg: "bg-blue-50" },
-          { label: "معلق", value: pendingRecords.length, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50" },
+          { label: "عدد السجلات", value: rows.length, icon: Users, color: "text-blue-600", bg: "bg-blue-50" },
+          { label: "معلق", value: pendingRows.length, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50" },
         ].map(k => (
           <Card key={k.label} className="border-0 shadow-sm">
             <CardContent className="p-4 flex items-center gap-3">
@@ -134,7 +160,6 @@ function SalariesTab() {
         ))}
       </div>
 
-      {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <div className="flex items-center gap-2">
           <Label className="text-sm">الشهر:</Label>
@@ -157,7 +182,6 @@ function SalariesTab() {
         </div>
       </div>
 
-      {/* Table */}
       <Card className="border-0 shadow-sm overflow-hidden">
         <CardContent className="p-0">
           <table className="w-full text-sm">
@@ -165,7 +189,7 @@ function SalariesTab() {
               <tr className="bg-gray-50 border-b">
                 <th className="px-3 py-3 text-center w-10">
                   <Checkbox
-                    checked={pendingRecords.length > 0 && pendingRecords.every(r => selectedIds.includes(r.id))}
+                    checked={pendingRows.length > 0 && pendingRows.every(r => selectedIds.includes(r.id))}
                     onCheckedChange={toggleAll}
                   />
                 </th>
@@ -180,20 +204,22 @@ function SalariesTab() {
               </tr>
             </thead>
             <tbody>
-              {monthRecords.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={9} className="text-center py-10 text-gray-400">جاري التحميل...</td></tr>
+              ) : rows.length === 0 ? (
                 <tr><td colSpan={9} className="text-center py-10 text-gray-400">لا توجد سجلات لهذا الشهر</td></tr>
-              ) : monthRecords.map((rec, idx) => (
+              ) : rows.map((rec, idx) => (
                 <tr key={rec.id} className={cn("border-b hover:bg-gray-50/50 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
                   <td className="px-3 py-3 text-center">
                     {rec.status === "معلق" ? (
                       <Checkbox checked={selectedIds.includes(rec.id)} onCheckedChange={() => toggleSelect(rec.id)} />
                     ) : <span />}
                   </td>
-                  <td className="px-4 py-3.5 font-medium text-gray-800">{getName(rec.employeeId)}</td>
-                  <td className="px-4 py-3.5 text-gray-600">{rec.month}</td>
+                  <td className="px-4 py-3.5 font-medium text-gray-800">{rec.employeeName ?? "—"}</td>
+                  <td className="px-4 py-3.5 text-gray-600">{rec.year}-{String(rec.month).padStart(2, "0")}</td>
                   <td className="px-4 py-3.5 text-gray-700">{rec.baseSalary.toLocaleString()}</td>
-                  <td className="px-4 py-3.5 text-yellow-600">{rec.bonus > 0 ? `+${rec.bonus.toLocaleString()}` : "—"}</td>
-                  <td className="px-4 py-3.5 text-red-500">{rec.deductions > 0 ? `-${rec.deductions.toLocaleString()}` : "—"}</td>
+                  <td className="px-4 py-3.5 text-yellow-600">{(rec.bonuses ?? 0) > 0 ? `+${(rec.bonuses ?? 0).toLocaleString()}` : "—"}</td>
+                  <td className="px-4 py-3.5 text-red-500">{(rec.deductions ?? 0) > 0 ? `-${(rec.deductions ?? 0).toLocaleString()}` : "—"}</td>
                   <td className="px-4 py-3.5 text-green-700 font-semibold">{rec.netSalary.toLocaleString()} ج.م</td>
                   <td className="px-4 py-3.5">
                     <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium",
@@ -208,13 +234,12 @@ function SalariesTab() {
         </CardContent>
       </Card>
 
-      {/* Bulk Pay Confirm */}
       <Dialog open={showBulkPay} onOpenChange={setShowBulkPay}>
         <DialogContent dir="rtl" className="max-w-sm bg-white">
           <DialogHeader><DialogTitle>تأكيد صرف المرتبات</DialogTitle></DialogHeader>
           <p className="text-sm text-gray-600 py-2">
             هل تريد صرف مرتبات <strong>{selectedIds.length}</strong> موظفين؟
-            إجمالي: <strong className="text-green-600">{selectedIds.reduce((s, id) => s + (salaryRecords.find(r => r.id === id)?.netSalary ?? 0), 0).toLocaleString()} ج.م</strong>
+            إجمالي: <strong className="text-green-600">{selectedIds.reduce((s, id) => s + (rows.find(r => r.id === id)?.netSalary ?? 0), 0).toLocaleString()} ج.م</strong>
           </p>
           <DialogFooter className="gap-2">
             <Button onClick={handleBulkPay} className="bg-green-600 hover:bg-green-700 text-white">تأكيد الصرف</Button>
@@ -223,34 +248,29 @@ function SalariesTab() {
         </DialogContent>
       </Dialog>
 
-      {/* Bulk Bonus */}
       <Dialog open={showBulkBonus} onOpenChange={setShowBulkBonus}>
         <DialogContent dir="rtl" className="max-w-sm bg-white">
-          <DialogHeader><DialogTitle>إضافة إكرامية جماعية</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
-            <p className="text-sm text-gray-500">سيتم إضافة الإكرامية لـ {selectedIds.length} موظفين</p>
-            <div className="space-y-1.5">
-              <Label>مبلغ الإكرامية (ج.م)</Label>
-              <Input type="number" dir="rtl" value={bonusAmount} onChange={e => setBonusAmount(e.target.value)} placeholder="0" className="border-gray-200" />
-            </div>
+          <DialogHeader><DialogTitle>إضافة إكرامية</DialogTitle></DialogHeader>
+          <div className="space-y-1.5 py-2">
+            <Label>المبلغ لكل موظف (ج.م)</Label>
+            <Input type="number" value={bonusAmount} onChange={e => setBonusAmount(e.target.value)} dir="rtl" className="border-gray-200" />
           </div>
           <DialogFooter className="gap-2">
-            <Button onClick={handleBulkBonus} className="bg-yellow-500 hover:bg-yellow-600 text-white">إضافة الإكرامية</Button>
+            <Button onClick={handleBulkBonus} className="bg-yellow-500 hover:bg-yellow-600 text-white">إضافة</Button>
             <Button variant="outline" onClick={() => setShowBulkBonus(false)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Add Salary */}
       <Dialog open={showAddSalary} onOpenChange={setShowAddSalary}>
-        <DialogContent dir="rtl" className="max-w-lg bg-white">
+        <DialogContent dir="rtl" className="max-w-md bg-white">
           <DialogHeader><DialogTitle>إضافة سجل راتب</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="space-y-1.5">
+            <div className="col-span-2 space-y-1.5">
               <Label>الموظف <span className="text-red-500">*</span></Label>
               <Select value={addForm.employeeId} onValueChange={v => setAddForm({ ...addForm, employeeId: v })}>
                 <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="اختر موظفاً" /></SelectTrigger>
-                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>)}</SelectContent>
+                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
@@ -258,18 +278,18 @@ function SalariesTab() {
               <Input type="month" value={addForm.month} onChange={e => setAddForm({ ...addForm, month: e.target.value })} className="border-gray-200" />
             </div>
             <div className="space-y-1.5">
-              <Label>الراتب الأساسي <span className="text-red-500">*</span></Label>
-              <Input type="number" dir="rtl" value={addForm.baseSalary} onChange={e => setAddForm({ ...addForm, baseSalary: e.target.value })} placeholder="0" className="border-gray-200" />
+              <Label>الأساسي <span className="text-red-500">*</span></Label>
+              <Input type="number" value={addForm.baseSalary} onChange={e => setAddForm({ ...addForm, baseSalary: e.target.value })} dir="rtl" className="border-gray-200" />
             </div>
             <div className="space-y-1.5">
-              <Label>الإكرامية</Label>
-              <Input type="number" dir="rtl" value={addForm.bonus} onChange={e => setAddForm({ ...addForm, bonus: e.target.value })} placeholder="0" className="border-gray-200" />
+              <Label>إكرامية</Label>
+              <Input type="number" value={addForm.bonus} onChange={e => setAddForm({ ...addForm, bonus: e.target.value })} dir="rtl" className="border-gray-200" />
             </div>
             <div className="space-y-1.5">
-              <Label>الاستقطاعات</Label>
-              <Input type="number" dir="rtl" value={addForm.deductions} onChange={e => setAddForm({ ...addForm, deductions: e.target.value })} placeholder="0" className="border-gray-200" />
+              <Label>استقطاع</Label>
+              <Input type="number" value={addForm.deductions} onChange={e => setAddForm({ ...addForm, deductions: e.target.value })} dir="rtl" className="border-gray-200" />
             </div>
-            <div className="space-y-1.5">
+            <div className="col-span-2 space-y-1.5">
               <Label>ملاحظات</Label>
               <Input dir="rtl" value={addForm.notes} onChange={e => setAddForm({ ...addForm, notes: e.target.value })} className="border-gray-200" />
             </div>
@@ -283,16 +303,23 @@ function SalariesTab() {
     </div>
   );
 }
-
 /* ──────────────────────────────────────────
    LEAVES TAB
 ────────────────────────────────────────── */
-function LeavesTab() {
-  const { employees, leaveRequests, addLeaveRequest, updateLeaveRequest } = useDb();
+function LeavesTab({ employees }: { employees: EmployeeMini[] }) {
+  const [rows, setRows] = useState<BackendLeave[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({ employeeId: "", type: "سنوي", startDate: "", endDate: "", reason: "" });
 
-  const getName = (id: number) => employees.find(e => e.id === id)?.name ?? `موظف #${id}`;
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setRows(await getLeaves()); }
+    catch (err) { toast.error(err instanceof Error ? err.message : "فشل تحميل الإجازات"); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const calcDays = (start: string, end: string) => {
     if (!start || !end) return 0;
@@ -300,33 +327,39 @@ function LeavesTab() {
     return Math.max(1, Math.round(diff / 86400000) + 1);
   };
 
-  const handleAdd = () => {
-    if (!addForm.employeeId || !addForm.startDate || !addForm.endDate) {
-      toast.error("يرجى تعبئة الحقول الإلزامية"); return;
+  const handleAdd = async () => {
+    if (!addForm.employeeId || !addForm.startDate || !addForm.endDate) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
+    try {
+      await addLeave({
+        employeeId: addForm.employeeId,
+        leaveType: addForm.type,
+        fromDate: addForm.startDate,
+        toDate: addForm.endDate,
+        reason: addForm.reason || undefined,
+      });
+      toast.success("تم تقديم طلب الإجازة");
+      setShowAdd(false);
+      setAddForm({ employeeId: "", type: "سنوي", startDate: "", endDate: "", reason: "" });
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل إضافة الإجازة");
     }
-    addLeaveRequest({
-      employeeId: Number(addForm.employeeId),
-      type: addForm.type,
-      startDate: addForm.startDate,
-      endDate: addForm.endDate,
-      days: calcDays(addForm.startDate, addForm.endDate),
-      status: "معلق",
-      reason: addForm.reason,
-      approvedBy: "",
-    });
-    toast.success("تم تقديم طلب الإجازة");
-    setShowAdd(false);
-    setAddForm({ employeeId: "", type: "سنوي", startDate: "", endDate: "", reason: "" });
   };
 
-  const handleApprove = (req: LeaveRequest) => {
-    updateLeaveRequest(req.id, { status: "موافق", approvedBy: "الإدارة" });
-    toast.success(`تمت الموافقة على إجازة ${getName(req.employeeId)}`);
+  const handleApprove = async (req: BackendLeave) => {
+    try {
+      await setLeaveStatus(req.id, "موافق");
+      toast.success(`تمت الموافقة على إجازة ${req.employeeName ?? ""}`);
+      await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل الموافقة"); }
   };
 
-  const handleReject = (req: LeaveRequest) => {
-    updateLeaveRequest(req.id, { status: "مرفوض", approvedBy: "الإدارة" });
-    toast.error(`تم رفض إجازة ${getName(req.employeeId)}`);
+  const handleReject = async (req: BackendLeave) => {
+    try {
+      await setLeaveStatus(req.id, "مرفوض");
+      toast.error(`تم رفض إجازة ${req.employeeName ?? ""}`);
+      await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل الرفض"); }
   };
 
   const statusStyle = (s: string) =>
@@ -340,6 +373,8 @@ function LeavesTab() {
     "عارض": "bg-yellow-100 text-yellow-700",
     "بدون راتب": "bg-gray-100 text-gray-600",
   };
+
+  const fmt = (d: string) => d ? d.split("T")[0] : "";
 
   return (
     <div className="space-y-4">
@@ -365,17 +400,19 @@ function LeavesTab() {
               </tr>
             </thead>
             <tbody>
-              {leaveRequests.length === 0 ? (
+              {loading ? (
+                <tr><td colSpan={8} className="text-center py-10 text-gray-400">جاري التحميل...</td></tr>
+              ) : rows.length === 0 ? (
                 <tr><td colSpan={8} className="text-center py-10 text-gray-400">لا توجد طلبات إجازة</td></tr>
-              ) : leaveRequests.map((req, idx) => (
+              ) : rows.map((req, idx) => (
                 <tr key={req.id} className={cn("border-b hover:bg-gray-50/50 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
-                  <td className="px-4 py-3.5 font-medium text-gray-800">{getName(req.employeeId)}</td>
+                  <td className="px-4 py-3.5 font-medium text-gray-800">{req.employeeName ?? "—"}</td>
                   <td className="px-4 py-3.5">
-                    <span className={cn("px-2 py-0.5 rounded-full text-xs", typeColors[req.type] ?? "bg-gray-100 text-gray-600")}>{req.type}</span>
+                    <span className={cn("px-2 py-0.5 rounded-full text-xs", typeColors[req.leaveType] ?? "bg-gray-100 text-gray-600")}>{req.leaveType}</span>
                   </td>
-                  <td className="px-4 py-3.5 text-gray-600">{req.startDate}</td>
-                  <td className="px-4 py-3.5 text-gray-600">{req.endDate}</td>
-                  <td className="px-4 py-3.5 text-center font-semibold text-blue-700">{req.days}</td>
+                  <td className="px-4 py-3.5 text-gray-600">{fmt(req.fromDate)}</td>
+                  <td className="px-4 py-3.5 text-gray-600">{fmt(req.toDate)}</td>
+                  <td className="px-4 py-3.5 text-center font-semibold text-blue-700">{req.daysCount}</td>
                   <td className="px-4 py-3.5 text-gray-500 text-xs max-w-[140px] truncate">{req.reason || "—"}</td>
                   <td className="px-4 py-3.5">
                     <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", statusStyle(req.status))}>{req.status}</span>
@@ -407,7 +444,7 @@ function LeavesTab() {
               <Label>الموظف <span className="text-red-500">*</span></Label>
               <Select value={addForm.employeeId} onValueChange={v => setAddForm({ ...addForm, employeeId: v })}>
                 <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="اختر موظفاً" /></SelectTrigger>
-                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>)}</SelectContent>
+                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
@@ -450,55 +487,68 @@ function LeavesTab() {
 /* ──────────────────────────────────────────
    ADVANCES & ABSENCES TAB
 ────────────────────────────────────────── */
-function AdvancesTab() {
-  const { employees, advances, absenceRecords, addAdvance, updateAdvance, addAbsenceRecord } = useDb();
+function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
+  const [advances, setAdvances] = useState<BackendAdvance[]>([]);
+  const [absences, setAbsences] = useState<BackendAbsence[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddAdv, setShowAddAdv] = useState(false);
   const [showAddAbs, setShowAddAbs] = useState(false);
   const [advForm, setAdvForm] = useState({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
   const [absForm, setAbsForm] = useState({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
 
-  const getName = (id: number) => employees.find(e => e.id === id)?.name ?? `موظف #${id}`;
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [advList, absList] = await Promise.all([getAdvances(), getAbsences()]);
+      setAdvances(advList);
+      setAbsences(absList);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "فشل تحميل البيانات");
+    } finally { setLoading(false); }
+  }, []);
 
-  const handleAddAdv = () => {
+  useEffect(() => { load(); }, [load]);
+
+  const handleAddAdv = async () => {
     if (!advForm.employeeId || !advForm.amount) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
-    const amt = Number(advForm.amount);
-    const months = Number(advForm.deductMonths) || 1;
-    addAdvance({
-      employeeId: Number(advForm.employeeId),
-      amount: amt,
-      date: new Date().toISOString().slice(0, 10),
-      reason: advForm.reason,
-      deductMonths: months,
-      monthlyDeduction: Math.ceil(amt / months),
-      remainingAmount: amt,
-      status: "نشط",
-    });
-    toast.success("تم تسجيل السلفة");
-    setShowAddAdv(false);
-    setAdvForm({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
+    try {
+      await addAdvance({
+        employeeId: advForm.employeeId,
+        amount: Number(advForm.amount),
+        installmentsCount: Number(advForm.deductMonths) || 1,
+        reason: advForm.reason || undefined,
+      });
+      toast.success("تم تسجيل السلفة");
+      setShowAddAdv(false);
+      setAdvForm({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
+      await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل إضافة السلفة"); }
   };
 
-  const handleAddAbs = () => {
+  const handleAddAbs = async () => {
     if (!absForm.employeeId || !absForm.date) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
-    addAbsenceRecord({
-      employeeId: Number(absForm.employeeId),
-      date: absForm.date,
-      type: absForm.type,
-      reason: absForm.reason,
-      deduction: Number(absForm.deduction) || 0,
-      notes: "",
-    });
-    toast.success("تم تسجيل الغياب/التأخير");
-    setShowAddAbs(false);
-    setAbsForm({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
+    try {
+      await addAbsence({
+        employeeId: absForm.employeeId,
+        absenceDate: absForm.date,
+        absenceType: absForm.type,
+        deductionAmount: Number(absForm.deduction) || 0,
+        notes: absForm.reason || undefined,
+      });
+      toast.success("تم تسجيل الغياب/التأخير");
+      setShowAddAbs(false);
+      setAbsForm({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
+      await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل تسجيل الغياب"); }
   };
 
-  const advStatusStyle = (s: string) =>
+  const advStatusStyle = (s?: string | null) =>
     s === "مسدد" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700";
+
+  const fmt = (d: string) => d ? d.split("T")[0] : "";
 
   return (
     <div className="space-y-6">
-      {/* Advances */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-gray-700 text-sm">السلف</h3>
@@ -517,22 +567,24 @@ function AdvancesTab() {
                 </tr>
               </thead>
               <tbody>
-                {advances.length === 0 ? (
+                {loading ? (
+                  <tr><td colSpan={7} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
+                ) : advances.length === 0 ? (
                   <tr><td colSpan={7} className="text-center py-8 text-gray-400">لا توجد سلف مسجلة</td></tr>
                 ) : advances.map((adv, idx) => (
                   <tr key={adv.id} className={cn("border-b hover:bg-gray-50/50", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
-                    <td className="px-4 py-3.5 font-medium text-gray-800">{getName(adv.employeeId)}</td>
+                    <td className="px-4 py-3.5 font-medium text-gray-800">{adv.employeeName ?? "—"}</td>
                     <td className="px-4 py-3.5 font-semibold text-red-600">{adv.amount.toLocaleString()} ج.م</td>
-                    <td className="px-4 py-3.5 text-gray-600">{adv.date}</td>
-                    <td className="px-4 py-3.5 text-gray-500 text-xs">{adv.reason}</td>
+                    <td className="px-4 py-3.5 text-gray-600">{fmt(adv.advanceDate)}</td>
+                    <td className="px-4 py-3.5 text-gray-500 text-xs">{adv.reason ?? "—"}</td>
                     <td className="px-4 py-3.5 text-orange-600">{adv.monthlyDeduction.toLocaleString()} ج.م</td>
                     <td className="px-4 py-3.5 font-medium">
-                      {adv.remainingAmount > 0
-                        ? <span className="text-orange-700">{adv.remainingAmount.toLocaleString()} ج.م</span>
+                      {(adv.remainingAmount ?? 0) > 0
+                        ? <span className="text-orange-700">{(adv.remainingAmount ?? 0).toLocaleString()} ج.م</span>
                         : <span className="text-green-600">مسدد</span>}
                     </td>
                     <td className="px-4 py-3.5">
-                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", advStatusStyle(adv.status))}>{adv.status}</span>
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", advStatusStyle(adv.status))}>{adv.status ?? "—"}</span>
                     </td>
                   </tr>
                 ))}
@@ -542,7 +594,6 @@ function AdvancesTab() {
         </Card>
       </div>
 
-      {/* Absences */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-gray-700 text-sm">الغياب والتأخير</h3>
@@ -555,25 +606,26 @@ function AdvancesTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
-                  {["الموظف", "التاريخ", "النوع", "السبب", "الاستقطاع", "ملاحظات"].map(h => (
+                  {["الموظف", "التاريخ", "النوع", "الاستقطاع", "ملاحظات"].map(h => (
                     <th key={h} className="text-right px-4 py-3 text-xs font-medium text-gray-500">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {absenceRecords.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-8 text-gray-400">لا توجد سجلات غياب</td></tr>
-                ) : absenceRecords.map((abs, idx) => (
+                {loading ? (
+                  <tr><td colSpan={5} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
+                ) : absences.length === 0 ? (
+                  <tr><td colSpan={5} className="text-center py-8 text-gray-400">لا توجد سجلات غياب</td></tr>
+                ) : absences.map((abs, idx) => (
                   <tr key={abs.id} className={cn("border-b hover:bg-gray-50/50", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
-                    <td className="px-4 py-3.5 font-medium text-gray-800">{getName(abs.employeeId)}</td>
-                    <td className="px-4 py-3.5 text-gray-600">{abs.date}</td>
+                    <td className="px-4 py-3.5 font-medium text-gray-800">{abs.employeeName ?? "—"}</td>
+                    <td className="px-4 py-3.5 text-gray-600">{fmt(abs.absenceDate)}</td>
                     <td className="px-4 py-3.5">
-                      <span className={cn("px-2 py-0.5 rounded-full text-xs", abs.type === "غياب" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700")}>
-                        {abs.type}
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs", abs.absenceType === "غياب" ? "bg-red-100 text-red-700" : "bg-yellow-100 text-yellow-700")}>
+                        {abs.absenceType ?? "—"}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-gray-500 text-xs">{abs.reason || "—"}</td>
-                    <td className="px-4 py-3.5 text-red-600 font-medium">{abs.deduction > 0 ? `-${abs.deduction.toLocaleString()} ج.م` : "—"}</td>
+                    <td className="px-4 py-3.5 text-red-600 font-medium">{(abs.deductionAmount ?? 0) > 0 ? `-${(abs.deductionAmount ?? 0).toLocaleString()} ج.م` : "—"}</td>
                     <td className="px-4 py-3.5 text-gray-500 text-xs">{abs.notes || "—"}</td>
                   </tr>
                 ))}
@@ -583,7 +635,6 @@ function AdvancesTab() {
         </Card>
       </div>
 
-      {/* Add Advance Dialog */}
       <Dialog open={showAddAdv} onOpenChange={setShowAddAdv}>
         <DialogContent dir="rtl" className="max-w-md bg-white">
           <DialogHeader><DialogTitle>إضافة سلفة جديدة</DialogTitle></DialogHeader>
@@ -592,7 +643,7 @@ function AdvancesTab() {
               <Label>الموظف <span className="text-red-500">*</span></Label>
               <Select value={advForm.employeeId} onValueChange={v => setAdvForm({ ...advForm, employeeId: v })}>
                 <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="اختر موظفاً" /></SelectTrigger>
-                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>)}</SelectContent>
+                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
@@ -615,7 +666,6 @@ function AdvancesTab() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Absence Dialog */}
       <Dialog open={showAddAbs} onOpenChange={setShowAddAbs}>
         <DialogContent dir="rtl" className="max-w-md bg-white">
           <DialogHeader><DialogTitle>تسجيل غياب / تأخير</DialogTitle></DialogHeader>
@@ -624,7 +674,7 @@ function AdvancesTab() {
               <Label>الموظف <span className="text-red-500">*</span></Label>
               <Select value={absForm.employeeId} onValueChange={v => setAbsForm({ ...absForm, employeeId: v })}>
                 <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="اختر موظفاً" /></SelectTrigger>
-                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={String(e.id)}>{e.name}</SelectItem>)}</SelectContent>
+                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
@@ -646,7 +696,7 @@ function AdvancesTab() {
               <Input type="number" dir="rtl" value={absForm.deduction} onChange={e => setAbsForm({ ...absForm, deduction: e.target.value })} placeholder="0" className="border-gray-200" />
             </div>
             <div className="col-span-2 space-y-1.5">
-              <Label>السبب</Label>
+              <Label>ملاحظات</Label>
               <Input dir="rtl" value={absForm.reason} onChange={e => setAbsForm({ ...absForm, reason: e.target.value })} className="border-gray-200" />
             </div>
           </div>
@@ -663,40 +713,180 @@ function AdvancesTab() {
 /* ──────────────────────────────────────────
    MAIN COMPONENT
 ────────────────────────────────────────── */
+type EmployeeRow = {
+  id: string;
+  name: string;
+  role: string;
+  jobTitleId: string | null;
+  status: "active" | "inactive";
+  phone: string;
+  email: string;
+  salary: number;
+  raw: BackendEmployee;
+};
+
+function toRow(e: BackendEmployee): EmployeeRow {
+  return {
+    id: e.id,
+    name: (e.arName?.trim() || e.fullName) ?? "",
+    role: (e.jobTitleArName?.trim() || e.jobTitleName) ?? "",
+    jobTitleId: e.jobTitleId ?? null,
+    status: e.employmentStatus?.toLowerCase() === "active" ? "active" : "inactive",
+    phone: e.phone ?? "",
+    email: e.email ?? "",
+    salary: e.baseSalary ?? 0,
+    raw: e,
+  };
+}
+
 export function Employees() {
-  const { employees, updateEmployee } = useDb();
+  const [employees, setEmployees] = useState<EmployeeRow[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [jobTitles, setJobTitles] = useState<JobTitleOption[]>([]);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [showPerms, setShowPerms] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showView, setShowView] = useState(false);
-  const [selected, setSelected] = useState<Employee | null>(null);
-  const [viewTarget, setViewTarget] = useState<Employee | null>(null);
-  const [editTarget, setEditTarget] = useState<Employee | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", role: "", phone: "", email: "", salary: "" });
+  const [selected, setSelected] = useState<EmployeeRow | null>(null);
+  const [viewTarget, setViewTarget] = useState<EmployeeRow | null>(null);
+  const [editTarget, setEditTarget] = useState<EmployeeRow | null>(null);
+  const [editForm, setEditForm] = useState({ fullName: "", arName: "", jobTitleId: "", phone: "", email: "", salary: "" });
   const [search, setSearch] = useState("");
+
+  const emptyAddForm = {
+    fullName: "", arName: "", userName: "", email: "", phone: "",
+    role: "Warehouse", jobTitleId: "", status: "active", salary: "",
+    password: "", confirmPassword: "", isUser: false,
+  };
+  const [addForm, setAddForm] = useState(emptyAddForm);
+  const [showPwd, setShowPwd] = useState(false);
+  const [addLoading, setAddLoading] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+
+  const loadEmployees = useCallback(async () => {
+    setLoadingList(true);
+    try {
+      const { items } = await getAllEmployees(1, 100);
+      setEmployees(items.map(toRow));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "فشل تحميل الموظفين";
+      toast.error(message);
+    } finally {
+      setLoadingList(false);
+    }
+  }, []);
+
+  const loadJobTitles = useCallback(async () => {
+    try {
+      const list = await getJobTitlesDDL();
+      setJobTitles(list);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "فشل تحميل المسميات الوظيفية";
+      toast.error(message);
+    }
+  }, []);
+
+  useEffect(() => { loadEmployees(); loadJobTitles(); }, [loadEmployees, loadJobTitles]);
+
+  const handleAddEmployee = async () => {
+    if (!addForm.fullName || !addForm.jobTitleId) {
+      toast.error("يرجى تعبئة الحقول الإلزامية");
+      return;
+    }
+    if (addForm.isUser) {
+      if (!addForm.userName || !addForm.email || !addForm.password) {
+        toast.error("يرجى تعبئة بيانات تسجيل الدخول");
+        return;
+      }
+      if (addForm.password !== addForm.confirmPassword) {
+        toast.error("كلمتا المرور غير متطابقتين");
+        return;
+      }
+    }
+    setAddLoading(true);
+    try {
+      await addEmployeeRequest({
+        code: `EMP-${Date.now()}`,
+        fullName: addForm.fullName,
+        arName: addForm.arName || undefined,
+        phone: addForm.phone || undefined,
+        email: addForm.email || undefined,
+        jobTitleId: addForm.jobTitleId,
+        baseSalary: addForm.salary ? Number(addForm.salary) : undefined,
+        employmentStatus: addForm.status === "active" ? "Active" : "Inactive",
+        ...(addForm.isUser ? {
+          userName: addForm.userName,
+          password: addForm.password,
+          roles: [addForm.role],
+        } : {}),
+      });
+      toast.success(`تم إضافة "${addForm.arName || addForm.fullName}" بنجاح`);
+      setAddForm(emptyAddForm);
+      setShowAdd(false);
+      await loadEmployees();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "فشل إضافة الموظف";
+      toast.error(message);
+    } finally {
+      setAddLoading(false);
+    }
+  };
 
   const filtered = employees.filter(e =>
     e.name.includes(search) || e.role.includes(search) || e.phone.includes(search)
   );
   const pager = usePagination(filtered, 12);
 
-  const openEdit = (emp: Employee) => {
+  const openEdit = (emp: EmployeeRow) => {
     setEditTarget(emp);
-    setEditForm({ name: emp.name, role: emp.role, phone: emp.phone, email: emp.email, salary: String(emp.salary) });
+    setEditForm({
+      fullName: emp.raw.fullName ?? "",
+      arName: emp.raw.arName ?? "",
+      jobTitleId: emp.jobTitleId ?? "",
+      phone: emp.phone,
+      email: emp.email,
+      salary: String(emp.salary),
+    });
     setShowEdit(true);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editTarget) return;
-    if (!editForm.name || !editForm.role) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
-    updateEmployee(editTarget.id, {
-      name: editForm.name, role: editForm.role, phone: editForm.phone,
-      email: editForm.email, salary: Number(editForm.salary) || 0,
-    });
-    toast.success(`تم تحديث بيانات "${editForm.name}" بنجاح`);
-    setShowEdit(false);
-    setEditTarget(null);
+    if (!editForm.fullName || !editForm.jobTitleId) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
+    setEditLoading(true);
+    try {
+      const r = editTarget.raw;
+      await editEmployeeRequest({
+        id: r.id,
+        code: r.code,
+        fullName: editForm.fullName,
+        arName: editForm.arName || null,
+        nationalId: r.nationalId ?? null,
+        phone: editForm.phone || null,
+        email: editForm.email || null,
+        address: r.address ?? null,
+        jobTitleId: editForm.jobTitleId,
+        department: r.department ?? null,
+        hireDate: r.hireDate ?? null,
+        terminationDate: r.terminationDate ?? null,
+        baseSalary: editForm.salary ? Number(editForm.salary) : null,
+        employmentStatus: r.employmentStatus,
+        bankAccountNumber: r.bankAccountNumber ?? null,
+        notes: r.notes ?? null,
+        userId: r.userId ?? null,
+        isActive: r.isActive,
+      });
+      toast.success(`تم تحديث بيانات "${editForm.arName || editForm.fullName}" بنجاح`);
+      setShowEdit(false);
+      setEditTarget(null);
+      await loadEmployees();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "فشل تحديث الموظف";
+      toast.error(message);
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   return (
@@ -705,7 +895,9 @@ export function Employees() {
       <motion.div variants={cardItem} className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-800">الموظفون</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{employees.length} موظفين مسجلين</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {loadingList ? "جاري التحميل..." : `${employees.length} موظفين مسجلين`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white">
@@ -859,9 +1051,9 @@ export function Employees() {
           )}
         </TabsContent>
 
-        <TabsContent value="salaries"><SalariesTab /></TabsContent>
-        <TabsContent value="leaves"><LeavesTab /></TabsContent>
-        <TabsContent value="advances"><AdvancesTab /></TabsContent>
+        <TabsContent value="salaries"><SalariesTab employees={employees.map(e => ({ id: e.id, name: e.name }))} /></TabsContent>
+        <TabsContent value="leaves"><LeavesTab employees={employees.map(e => ({ id: e.id, name: e.name }))} /></TabsContent>
+        <TabsContent value="advances"><AdvancesTab employees={employees.map(e => ({ id: e.id, name: e.name }))} /></TabsContent>
       </Tabs>
 
       {/* View Employee Dialog */}
@@ -942,25 +1134,45 @@ export function Employees() {
       </Dialog>
 
       {/* Add Employee Dialog */}
-      <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent dir="rtl" className="max-w-lg bg-white">
+      <Dialog open={showAdd} onOpenChange={(o) => { setShowAdd(o); if (!o) setAddForm(emptyAddForm); }}>
+        <DialogContent dir="rtl" className="max-w-lg bg-white max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>إضافة موظف جديد</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2 space-y-1.5"><Label>الاسم الكامل <span className="text-red-500">*</span></Label><Input dir="rtl" placeholder="الاسم الكامل للموظف" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
             <div className="space-y-1.5">
-              <Label>الدور الوظيفي <span className="text-red-500">*</span></Label>
-              <Select>
-                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
+              <Label>الاسم الكامل <span className="text-red-500">*</span></Label>
+              <Input
+                dir="ltr" placeholder="Employee full name"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={addForm.fullName}
+                onChange={e => setAddForm({ ...addForm, fullName: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>الاسم بالعربية</Label>
+              <Input
+                dir="rtl" placeholder="الاسم بالعربية"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={addForm.arName}
+                onChange={e => setAddForm({ ...addForm, arName: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>المسمى الوظيفي <span className="text-red-500">*</span></Label>
+              <Select value={addForm.jobTitleId} onValueChange={v => setAddForm({ ...addForm, jobTitleId: v })}>
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر المسمى" /></SelectTrigger>
                 <SelectContent dir="rtl">
-                  <SelectItem value="مدير">مدير</SelectItem>
-                  <SelectItem value="محاسب">محاسب</SelectItem>
-                  <SelectItem value="عامل مخزن">عامل مخزن</SelectItem>
+                  {jobTitles.map(j => (
+                    <SelectItem key={j.id} value={j.id}>{j.arName || j.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1.5">
               <Label>حالة الموظف</Label>
-              <Select defaultValue="active">
+              <Select value={addForm.status} onValueChange={v => setAddForm({ ...addForm, status: v })}>
                 <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue /></SelectTrigger>
                 <SelectContent dir="rtl">
                   <SelectItem value="active">نشط</SelectItem>
@@ -968,12 +1180,113 @@ export function Employees() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5"><Label>رقم الهاتف</Label><Input dir="rtl" placeholder="01XXXXXXXXX" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
-            <div className="space-y-1.5"><Label>البريد الإلكتروني</Label><Input dir="rtl" type="email" placeholder="example@coldstorage.eg" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
-            <div className="space-y-1.5"><Label>الراتب (ج.م)</Label><Input dir="rtl" type="number" placeholder="0" className="border border-[#d1d5dc] bg-[#f9fafb]" /></div>
+
+            <div className="space-y-1.5">
+              <Label>رقم الهاتف</Label>
+              <Input
+                dir="rtl" placeholder="01XXXXXXXXX"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={addForm.phone}
+                onChange={e => setAddForm({ ...addForm, phone: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>البريد الإلكتروني{addForm.isUser && <span className="text-red-500"> *</span>}</Label>
+              <Input
+                dir="ltr" type="email" placeholder="example@coldstorage.eg"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={addForm.email}
+                onChange={e => setAddForm({ ...addForm, email: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>الراتب (ج.م)</Label>
+              <Input
+                dir="rtl" type="number" placeholder="0"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                value={addForm.salary}
+                onChange={e => setAddForm({ ...addForm, salary: e.target.value })}
+              />
+            </div>
+
+            <div className="col-span-2 pt-2 border-t flex items-center gap-2">
+              <Checkbox
+                id="isUser"
+                checked={addForm.isUser}
+                onCheckedChange={c => setAddForm({ ...addForm, isUser: Boolean(c) })}
+              />
+              <Label htmlFor="isUser" className="cursor-pointer">يمكنه تسجيل الدخول للنظام</Label>
+            </div>
+
+            {addForm.isUser && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>اسم المستخدم <span className="text-red-500">*</span></Label>
+                  <Input
+                    dir="ltr" placeholder="username"
+                    className="border border-[#d1d5dc] bg-[#f9fafb]"
+                    value={addForm.userName}
+                    onChange={e => setAddForm({ ...addForm, userName: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>الصلاحية <span className="text-red-500">*</span></Label>
+                  <Select value={addForm.role} onValueChange={v => setAddForm({ ...addForm, role: v })}>
+                    <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الصلاحية" /></SelectTrigger>
+                    <SelectContent dir="rtl">
+                      {ROLE_OPTIONS.map(r => (
+                        <SelectItem key={r.code} value={r.code}>{r.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>كلمة المرور <span className="text-red-500">*</span></Label>
+                  <div className="relative">
+                    <Input
+                      dir="ltr" type={showPwd ? "text" : "password"}
+                      className="border border-[#d1d5dc] bg-[#f9fafb]"
+                      value={addForm.password}
+                      onChange={e => setAddForm({ ...addForm, password: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPwd(s => !s)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    >
+                      {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>تأكيد كلمة المرور <span className="text-red-500">*</span></Label>
+                  <Input
+                    dir="ltr" type={showPwd ? "text" : "password"}
+                    className="border border-[#d1d5dc] bg-[#f9fafb]"
+                    value={addForm.confirmPassword}
+                    onChange={e => setAddForm({ ...addForm, confirmPassword: e.target.value })}
+                  />
+                </div>
+
+                <p className="col-span-2 text-xs text-gray-500">
+                  يجب أن تحتوي كلمة المرور على حرف كبير أو صغير، رقم، ورمز خاص، وطولها 6 أحرف على الأقل.
+                </p>
+              </>
+            )}
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
-            <Button onClick={() => { toast.success("تم إضافة الموظف بنجاح"); setShowAdd(false); }} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ</Button>
+            <Button
+              onClick={handleAddEmployee}
+              disabled={addLoading}
+              className="bg-[#155dfc] hover:bg-blue-700 text-white"
+            >
+              {addLoading ? "..." : "حفظ"}
+            </Button>
             <Button variant="outline" onClick={() => setShowAdd(false)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>
@@ -984,18 +1297,22 @@ export function Employees() {
         <DialogContent dir="rtl" className="max-w-lg bg-white">
           <DialogHeader><DialogTitle>تعديل بيانات الموظف</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2 space-y-1.5">
+            <div className="space-y-1.5">
               <Label>الاسم الكامل <span className="text-red-500">*</span></Label>
-              <Input dir="rtl" placeholder="الاسم الكامل للموظف" className="border border-[#d1d5dc] bg-[#f9fafb]" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+              <Input dir="ltr" placeholder="Employee full name" className="border border-[#d1d5dc] bg-[#f9fafb]" value={editForm.fullName} onChange={e => setEditForm({ ...editForm, fullName: e.target.value })} />
             </div>
             <div className="space-y-1.5">
-              <Label>الدور الوظيفي <span className="text-red-500">*</span></Label>
-              <Select value={editForm.role} onValueChange={v => setEditForm({ ...editForm, role: v })}>
-                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الدور" /></SelectTrigger>
+              <Label>الاسم بالعربية</Label>
+              <Input dir="rtl" placeholder="اسم الموظف بالعربية" className="border border-[#d1d5dc] bg-[#f9fafb]" value={editForm.arName} onChange={e => setEditForm({ ...editForm, arName: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>المسمى الوظيفي <span className="text-red-500">*</span></Label>
+              <Select value={editForm.jobTitleId} onValueChange={v => setEditForm({ ...editForm, jobTitleId: v })}>
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر المسمى" /></SelectTrigger>
                 <SelectContent dir="rtl">
-                  <SelectItem value="مدير">مدير</SelectItem>
-                  <SelectItem value="محاسب">محاسب</SelectItem>
-                  <SelectItem value="عامل مخزن">عامل مخزن</SelectItem>
+                  {jobTitles.map(j => (
+                    <SelectItem key={j.id} value={j.id}>{j.arName || j.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -1013,7 +1330,9 @@ export function Employees() {
             </div>
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
-            <Button onClick={handleSaveEdit} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ التعديلات</Button>
+            <Button onClick={handleSaveEdit} disabled={editLoading} className="bg-[#155dfc] hover:bg-blue-700 text-white">
+              {editLoading ? "..." : "حفظ التعديلات"}
+            </Button>
             <Button variant="outline" onClick={() => setShowEdit(false)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>

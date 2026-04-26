@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { Shield, Search, ChevronDown } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { useDb } from "../context/DbContext";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
+import { toast } from "sonner";
 import React from "react";
+import { getAllAuditLogs, type BackendAuditLog } from "../services/auditLogService";
 
 const actionColors: Record<string, string> = {
   "إضافة": "bg-green-100 text-green-700 border-green-200",
@@ -21,11 +22,54 @@ const modules = ["الكل", "الوارد", "المنصرف", "المخازن",
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
+type AuditView = {
+  id: string;
+  datetime: string;
+  user: string;
+  module: string;
+  action: string;
+  details: string;
+  ip: string;
+};
+
+const formatDateTime = (iso: string) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+const mapAuditLog = (l: BackendAuditLog): AuditView => ({
+  id: l.id,
+  datetime: formatDateTime(l.dateTime),
+  user: l.userName || "—",
+  module: l.module,
+  action: l.action,
+  details: l.details,
+  ip: l.ipAddress || "—",
+});
+
 export function AuditLog() {
-  const { auditLogs } = useDb();
+  const [rawLogs, setRawLogs] = useState<BackendAuditLog[]>([]);
   const [search, setSearch] = useState("");
   const [moduleFilter, setModuleFilter] = useState("الكل");
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await getAllAuditLogs({ pageIndex: 1, pageSize: 200 });
+        if (!cancelled) setRawLogs(list);
+      } catch (err: any) {
+        if (!cancelled) toast.error(err?.message ?? "فشل تحميل سجل التعديلات");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const auditLogs = useMemo<AuditView[]>(() => rawLogs.map(mapAuditLog), [rawLogs]);
 
   const filtered = auditLogs.filter(log => {
     const matchSearch = log.user.includes(search) || log.details.includes(search);

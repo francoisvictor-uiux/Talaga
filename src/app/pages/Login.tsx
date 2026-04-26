@@ -6,25 +6,48 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { toast } from "sonner";
+import { useAuth } from "../context/AuthContext";
+import { ApiError } from "../services/api";
 
 export function Login() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("123456");
+  const { login } = useAuth();
+  const [email, setEmail] = useState("admin@talaga.local");
+  const [password, setPassword] = useState("Admin@123");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !password) {
+    if (!email || !password) {
       toast.error("يرجى ملء جميع الحقول");
       return;
     }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    setLoading(false);
-    toast.success("تم تسجيل الدخول بنجاح");
-    navigate("/dashboard");
+    try {
+      await login(email, password);
+      toast.success("تم تسجيل الدخول بنجاح");
+      navigate("/dashboard");
+    } catch (err) {
+      console.error("[login] error:", err);
+      const status: number | undefined =
+        err instanceof ApiError ? err.status :
+        typeof (err as any)?.status === "number" ? (err as any).status :
+        undefined;
+      const message = err instanceof Error ? err.message : String(err);
+
+      if (status === 0) {
+        toast.error(`تعذر الاتصال بالخادم — تحقق من تشغيل API (الحالة: 0)`);
+      } else if (status === 400 || status === 401) {
+        toast.error("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+      } else if (status !== undefined) {
+        toast.error(`${message} (الحالة: ${status})`);
+      } else {
+        toast.error(message || "فشل تسجيل الدخول");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -74,15 +97,15 @@ export function Login() {
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="username" className="text-gray-700">اسم المستخدم</Label>
+              <Label htmlFor="email" className="text-gray-700">البريد الإلكتروني</Label>
               <Input
-                id="username"
-                type="text"
-                placeholder="أدخل اسم المستخدم"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                id="email"
+                type="email"
+                placeholder="admin@talaga.local"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="text-right border-gray-300 focus:border-blue-500 h-11"
-                dir="rtl"
+                dir="ltr"
               />
             </div>
 

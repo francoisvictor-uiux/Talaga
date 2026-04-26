@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   Plus, Search, Eye, Edit, Phone, X, DollarSign,
@@ -17,14 +17,47 @@ import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
 import { useDb } from "../context/DbContext";
 import { useTheme } from "../context/ThemeContext";
+import {
+  getAllCustomers,
+  addCustomer as apiAddCustomer,
+  editCustomer as apiEditCustomer,
+  type BackendCustomer,
+} from "../services/customerService";
 
-import type { CustomerExt } from "../context/DbContext";
 import { PageHeader } from "../components/layout/PageHeader";
 
-type Customer        = ReturnType<typeof useDb>["customers"][0];
+type CustomerView = {
+  id: string;
+  code: string;
+  name: string;
+  phone: string;
+  balance: number;
+  itemsStored: number;
+  agent: string;
+  address: string;
+  taxNumber: string;
+  defaultNaulage: number;
+  notes: string;
+  image?: string;
+};
+
 type CustomerDriver  = ReturnType<typeof useDb>["customerDrivers"][0];
 type CustomerItem    = ReturnType<typeof useDb>["customerItems"][0];
 type CustomerContact = ReturnType<typeof useDb>["customerContacts"][0];
+
+const mapCustomer = (c: BackendCustomer): CustomerView => ({
+  id: c.id,
+  code: c.code,
+  name: c.arName || c.name,
+  phone: c.mobile ?? c.phone ?? "",
+  balance: c.currentBalance ?? 0,
+  itemsStored: 0,
+  agent: "",
+  address: c.address ?? "",
+  taxNumber: c.taxNumber ?? "",
+  defaultNaulage: 0,
+  notes: c.notes ?? "",
+});
 
 /* ── animation presets ── */
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
@@ -112,7 +145,7 @@ function ViewToggle({ view, setView }: { view: "grid" | "list"; setView: (v: "gr
 /* ══════════════════════════════════════════════════════════
    CustomerAvatar
 ══════════════════════════════════════════════════════════ */
-function CustomerAvatar({ c, size = "sm" }: { c: Customer & { image?: string }; size?: "sm" | "lg" }) {
+function CustomerAvatar({ c, size = "sm" }: { c: CustomerView; size?: "sm" | "lg" }) {
   const dim = size === "lg" ? "w-16 h-16 text-2xl" : "w-9 h-9 text-sm";
   if (c.image) {
     return <img src={c.image} alt={c.name} className={cn(dim, "rounded-full object-cover flex-shrink-0")} />;
@@ -129,7 +162,7 @@ function CustomerAvatar({ c, size = "sm" }: { c: Customer & { image?: string }; 
 ══════════════════════════════════════════════════════════ */
 function CustomerCard({
   c, onView, onEdit,
-}: { c: Customer & { image?: string }; onView: (c: Customer) => void; onEdit: (c: Customer) => void }) {
+}: { c: CustomerView; onView: (c: CustomerView) => void; onEdit: (c: CustomerView) => void }) {
   const grad = avatarGrad(c.name);
   return (
     <motion.div variants={anim} className="h-full">
@@ -201,18 +234,42 @@ function CustomerCard({
 ══════════════════════════════════════════════════════════ */
 export function Customers() {
   const {
-    customers, customerDrivers, customerPricing, customerItems, customerContacts, items,
-    addCustomer, updateCustomer, updateCustomerItem, addCustomerItem, deleteCustomerItem, updateCustomerDriver,
+    customerDrivers, customerPricing, customerItems, customerContacts, items,
+    updateCustomerItem, addCustomerItem, deleteCustomerItem, updateCustomerDriver,
     addCustomerContact, updateCustomerContact, deleteCustomerContact,
   } = useDb();
   const { theme } = useTheme();
+
+  /* ── API-backed customer list ── */
+  const [rawCustomers, setRawCustomers] = useState<BackendCustomer[]>([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+
+  const reloadCustomers = async () => {
+    setLoadingCustomers(true);
+    try {
+      const list = await getAllCustomers(1, 100);
+      setRawCustomers(list);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحميل العملاء");
+    } finally {
+      setLoadingCustomers(false);
+    }
+  };
+
+  useEffect(() => { void reloadCustomers(); }, []);
+
+  const customers = useMemo<CustomerView[]>(
+    () => rawCustomers.filter(c => c.isActive).map(mapCustomer),
+    [rawCustomers],
+  );
+
   const [view, setView]                     = useState<"grid" | "list">("list");
   const [search, setSearch]                 = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerExt | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerView | null>(null);
   const [showAdd, setShowAdd]               = useState(false);
 
   /* ── Edit Customer State ── */
-  const [editCustomer, setEditCustomer]     = useState<CustomerExt | null>(null);
+  const [editCustomer, setEditCustomer]     = useState<CustomerView | null>(null);
   const [editCustomerForm, setEditCustomerForm] = useState({
     code: "", name: "", phone: "", agent: "", address: "",
     taxNumber: "", defaultNaulage: "", notes: "", image: "",
@@ -254,37 +311,39 @@ export function Customers() {
   const pager = usePagination(filtered, view === "grid" ? 12 : 10);
 
   /* ── Handlers ── */
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!newCustomer.name) { toast.error("يرجى إدخال اسم العميل"); return; }
-    const newId = customers.length ? Math.max(...customers.map(c => c.id)) + 1 : 1;
-    addCustomer({
-      code: newCustomer.code || `C${String(customers.length + 1).padStart(3, "0")}`,
-      name: newCustomer.name,
-      phone: newCustomer.phone,
-      agent: newCustomer.agent,
-      address: newCustomer.address,
-      taxNumber: newCustomer.taxNumber,
-      defaultNaulage: Number(newCustomer.defaultNaulage) || 0,
-      notes: newCustomer.notes,
-      image: newCustomer.image,
-      balance: 0,
-      itemsStored: 0,
-    });
-    newContacts.forEach(ct => addCustomerContact({ ...ct, customerId: newId }));
-    newNaulages.forEach(n => addCustomerItem({ customerId: newId, itemName: n.itemName, naulage: Number(n.naulage) || 0 }));
-    const parts = [];
-    if (newContacts.length) parts.push(`${newContacts.length} جهة اتصال`);
-    if (newNaulages.length) parts.push(`${newNaulages.length} نولون`);
-    toast.success(`تم إضافة العميل "${newCustomer.name}" بنجاح${parts.length ? ` مع ${parts.join(" و ")}` : ""}`);
-    setShowAdd(false);
-    setNewCustomer({ code: "", name: "", phone: "", agent: "", address: "", taxNumber: "", defaultNaulage: "", notes: "", image: "" });
-    setNewContacts([]);
-    setNewContactForm({ name: "", phone: "", role: "" });
-    setNewNaulages([]);
-    setNewNaulageForm({ itemName: "", naulage: "" });
+    try {
+      const created = await apiAddCustomer({
+        code: newCustomer.code || `C${String(rawCustomers.length + 1).padStart(3, "0")}`,
+        name: newCustomer.name,
+        arName: newCustomer.name,
+        phone: newCustomer.phone || undefined,
+        mobile: newCustomer.phone || undefined,
+        address: newCustomer.address || undefined,
+        taxNumber: newCustomer.taxNumber || undefined,
+        notes: newCustomer.notes || undefined,
+        openingBalance: 0,
+      });
+      newContacts.forEach(ct => addCustomerContact({ ...ct, customerId: created.id as any }));
+      newNaulages.forEach(n => addCustomerItem({ customerId: created.id as any, itemName: n.itemName, naulage: Number(n.naulage) || 0 }));
+      const parts = [];
+      if (newContacts.length) parts.push(`${newContacts.length} جهة اتصال`);
+      if (newNaulages.length) parts.push(`${newNaulages.length} نولون`);
+      toast.success(`تم إضافة العميل "${newCustomer.name}" بنجاح${parts.length ? ` مع ${parts.join(" و ")}` : ""}`);
+      setShowAdd(false);
+      setNewCustomer({ code: "", name: "", phone: "", agent: "", address: "", taxNumber: "", defaultNaulage: "", notes: "", image: "" });
+      setNewContacts([]);
+      setNewContactForm({ name: "", phone: "", role: "" });
+      setNewNaulages([]);
+      setNewNaulageForm({ itemName: "", naulage: "" });
+      await reloadCustomers();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل إضافة العميل");
+    }
   };
 
-  const openEditCustomer = (c: CustomerExt) => {
+  const openEditCustomer = (c: CustomerView) => {
     setEditCustomer(c);
     setEditCustomerForm({
       code: c.code,
@@ -295,34 +354,39 @@ export function Customers() {
       taxNumber: c.taxNumber ?? "",
       defaultNaulage: String(c.defaultNaulage ?? ""),
       notes: c.notes ?? "",
-      image: (c as any).image ?? "",
+      image: c.image ?? "",
     });
   };
 
-  const handleSaveEditCustomer = () => {
+  const handleSaveEditCustomer = async () => {
     if (!editCustomer) return;
     if (!editCustomerForm.name) { toast.error("يرجى إدخال اسم العميل"); return; }
-    updateCustomer(editCustomer.id, {
-      code: editCustomerForm.code,
-      name: editCustomerForm.name,
-      phone: editCustomerForm.phone,
-      agent: editCustomerForm.agent,
-      address: editCustomerForm.address,
-      taxNumber: editCustomerForm.taxNumber,
-      defaultNaulage: Number(editCustomerForm.defaultNaulage) || 0,
-      notes: editCustomerForm.notes,
-      image: editCustomerForm.image,
-    });
-    /* If editing from detail dialog, refresh selectedCustomer */
-    if (selectedCustomer && selectedCustomer.id === editCustomer.id) {
-      setSelectedCustomer(c => c ? {
-        ...c,
-        ...editCustomerForm,
-        defaultNaulage: Number(editCustomerForm.defaultNaulage) || 0,
-      } : c);
+    try {
+      await apiEditCustomer({
+        id: editCustomer.id,
+        code: editCustomerForm.code,
+        name: editCustomerForm.name,
+        arName: editCustomerForm.name,
+        phone: editCustomerForm.phone || undefined,
+        mobile: editCustomerForm.phone || undefined,
+        address: editCustomerForm.address || undefined,
+        taxNumber: editCustomerForm.taxNumber || undefined,
+        notes: editCustomerForm.notes || undefined,
+        isActive: true,
+      });
+      if (selectedCustomer && selectedCustomer.id === editCustomer.id) {
+        setSelectedCustomer(c => c ? {
+          ...c,
+          ...editCustomerForm,
+          defaultNaulage: Number(editCustomerForm.defaultNaulage) || 0,
+        } : c);
+      }
+      toast.success(`تم تحديث بيانات "${editCustomerForm.name}" بنجاح`);
+      setEditCustomer(null);
+      await reloadCustomers();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحديث العميل");
     }
-    toast.success(`تم تحديث بيانات "${editCustomerForm.name}" بنجاح`);
-    setEditCustomer(null);
   };
 
   const openEditNaulage = (ci: CustomerItem) => {
@@ -357,7 +421,7 @@ export function Customers() {
   const handleAddContact = () => {
     if (!selectedCustomer) return;
     if (!newContact.name || !newContact.phone) { toast.error("يرجى إدخال الاسم والهاتف"); return; }
-    addCustomerContact({ customerId: selectedCustomer.id, name: newContact.name, phone: newContact.phone, role: newContact.role });
+    addCustomerContact({ customerId: selectedCustomer.id as any, name: newContact.name, phone: newContact.phone, role: newContact.role });
     toast.success(`تم إضافة جهة الاتصال "${newContact.name}"`);
     setNewContact({ name: "", phone: "", role: "" });
     setShowAddContact(false);
@@ -636,7 +700,7 @@ export function Customers() {
                   {/* ── Contacts Tab ── */}
                   <TabsContent value="contacts">
                     <div className="space-y-2">
-                      {customerContacts.filter(c => c.customerId === selectedCustomer.id).map(ct => (
+                      {customerContacts.filter(c => String(c.customerId) === selectedCustomer.id).map(ct => (
                         <div key={ct.id} className="flex items-center gap-3 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
                           <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center text-sm text-purple-700 font-bold flex-shrink-0">
                             {ct.name.charAt(0)}
@@ -658,7 +722,7 @@ export function Customers() {
                           </div>
                         </div>
                       ))}
-                      {customerContacts.filter(c => c.customerId === selectedCustomer.id).length === 0 && (
+                      {customerContacts.filter(c => String(c.customerId) === selectedCustomer.id).length === 0 && (
                         <p className="text-sm text-gray-500 text-center py-10 bg-gray-50 rounded-xl">لا توجد جهات اتصال مضافة</p>
                       )}
 
@@ -706,7 +770,7 @@ export function Customers() {
                           <span className="text-xs text-amber-700">افتراضي: <strong>{selectedCustomer.defaultNaulage} ج.م/طرد</strong></span>
                         </div>
                       </div>
-                      {customerItems.filter(ci => ci.customerId === selectedCustomer.id).length > 0 ? (
+                      {customerItems.filter(ci => String(ci.customerId) === selectedCustomer.id).length > 0 ? (
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="bg-amber-50 rounded">
@@ -716,7 +780,7 @@ export function Customers() {
                             </tr>
                           </thead>
                           <tbody>
-                            {customerItems.filter(ci => ci.customerId === selectedCustomer.id).map(ci => (
+                            {customerItems.filter(ci => String(ci.customerId) === selectedCustomer.id).map(ci => (
                               <tr key={ci.id} className="border-b hover:bg-gray-50/50">
                                 <td className="p-2.5 font-medium">{ci.itemName}</td>
                                 <td className="p-2.5"><span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-semibold">{ci.naulage} ج.م</span></td>
@@ -771,8 +835,8 @@ export function Customers() {
                               onClick={() => {
                                 if (!selectedCustomer) return;
                                 if (!addNaulageForm.itemName || !addNaulageForm.naulage) { toast.error("الصنف والنولون مطلوبان"); return; }
-                                if (customerItems.some(ci => ci.customerId === selectedCustomer.id && ci.itemName === addNaulageForm.itemName)) { toast.error("هذا الصنف مضاف بالفعل"); return; }
-                                addCustomerItem({ customerId: selectedCustomer.id, itemName: addNaulageForm.itemName, naulage: Number(addNaulageForm.naulage) || 0 });
+                                if (customerItems.some(ci => String(ci.customerId) === selectedCustomer.id && ci.itemName === addNaulageForm.itemName)) { toast.error("هذا الصنف مضاف بالفعل"); return; }
+                                addCustomerItem({ customerId: selectedCustomer.id as any, itemName: addNaulageForm.itemName, naulage: Number(addNaulageForm.naulage) || 0 });
                                 toast.success(`تم إضافة نولون "${addNaulageForm.itemName}"`);
                                 setAddNaulageForm({ itemName: "", naulage: "" });
                                 setShowAddNaulage(false);
@@ -803,11 +867,11 @@ export function Customers() {
                   {/* ── Pricing Tab ── */}
                   <TabsContent value="pricing">
                     <div className="space-y-2">
-                      {customerPricing.filter(p => p.customerId === selectedCustomer.id).length > 0 ? (
+                      {customerPricing.filter(p => String(p.customerId) === selectedCustomer.id).length > 0 ? (
                         <table className="w-full text-sm">
                           <thead><tr className="bg-gray-50 rounded"><th className="text-right p-2.5 text-xs text-gray-500">الصنف</th><th className="text-right p-2.5 text-xs text-gray-500">سعر اليوم</th><th className="text-right p-2.5 text-xs text-gray-500">سعر الشهر</th></tr></thead>
                           <tbody>
-                            {customerPricing.filter(p => p.customerId === selectedCustomer.id).map(p => (
+                            {customerPricing.filter(p => String(p.customerId) === selectedCustomer.id).map(p => (
                               <tr key={p.id} className="border-b"><td className="p-2.5">{p.itemName}</td><td className="p-2.5">{p.pricePerDay} ج.م</td><td className="p-2.5">{p.pricePerMonth} ج.م</td></tr>
                             ))}
                           </tbody>
@@ -819,7 +883,7 @@ export function Customers() {
                   {/* ── Drivers Tab ── */}
                   <TabsContent value="drivers">
                     <div className="space-y-2">
-                      {customerDrivers.filter(d => d.customerId === selectedCustomer.id).map(d => (
+                      {customerDrivers.filter(d => String(d.customerId) === selectedCustomer.id).map(d => (
                         <div key={d.id} className="flex items-center gap-3 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
                           <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-sm text-blue-700 font-bold flex-shrink-0">{d.name.charAt(0)}</div>
                           <div className="flex-1 min-w-0">
@@ -837,7 +901,7 @@ export function Customers() {
                           </button>
                         </div>
                       ))}
-                      {customerDrivers.filter(d => d.customerId === selectedCustomer.id).length === 0 && (
+                      {customerDrivers.filter(d => String(d.customerId) === selectedCustomer.id).length === 0 && (
                         <p className="text-sm text-gray-500 text-center py-10 bg-gray-50 rounded-xl">لا يوجد سائقون مسجلون</p>
                       )}
                       <button className="flex items-center gap-1.5 text-blue-600 hover:bg-blue-50 text-sm font-medium px-3 py-2 rounded-xl border border-dashed border-blue-300 w-full justify-center mt-2">

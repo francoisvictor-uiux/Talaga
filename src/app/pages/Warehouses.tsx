@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Plus,
@@ -48,10 +48,113 @@ import {
   TabsList,
   TabsTrigger,
 } from "../components/ui/tabs";
-import { useDb } from "../context/DbContext";
 import { useConfirmDelete } from "../components/ui/ConfirmDialog";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
+import {
+  getAllWarehouses,
+  getChambers,
+  addWarehouse as apiAddWarehouse,
+  editWarehouse as apiEditWarehouse,
+  deleteWarehouse as apiDeleteWarehouse,
+  addChamber as apiAddChamber,
+  editChamber as apiEditChamber,
+  deleteChamber as apiDeleteChamber,
+  type BackendWarehouse,
+  type BackendChamber,
+} from "../services/warehouseService";
+
+type WHView = {
+  id: string;
+  code: string;
+  letter: string;
+  name: string;
+  storageType: string;
+  machineStatus: string;
+  machineType: string;
+  machinePower: number;
+  dailyRent: number;
+  monthlyRent: number;
+  length: number;
+  width: number;
+  height: number;
+  totalCapacity: number;
+  occupied: number;
+  capacityBox: number;
+  capacitySack: number;
+  capacityCarton: number;
+  chambers: number;
+  notes: string;
+};
+
+type CHView = {
+  id: string;
+  warehouseId: string;
+  code: string;
+  name: string;
+  storageType: string;
+  temp: number;
+  tempMin: number;
+  tempMax: number;
+  cells: number;
+  rowsCount: number;
+  columnsCount: number;
+  occupied: number;
+  length: number;
+  width: number;
+  height: number;
+  capacityWeight: number;
+  capacityBox: number;
+  capacitySack: number;
+  capacityCarton: number;
+  notes: string;
+};
+
+const mapWH = (w: BackendWarehouse, chamberCount: number, occupied: number): WHView => ({
+  id: w.id,
+  code: w.code,
+  letter: w.code?.replace(/^F-/, "").charAt(0)?.toUpperCase() || w.code?.charAt(0)?.toUpperCase() || "?",
+  name: w.arName || w.name,
+  storageType: w.storageType,
+  machineStatus: w.operationStatus,
+  machineType: w.machineType ?? "",
+  machinePower: w.machinePower ?? 0,
+  dailyRent: w.dailyRent ?? 0,
+  monthlyRent: w.monthlyRent ?? 0,
+  length: w.lengthM ?? 0,
+  width: w.widthM ?? 0,
+  height: w.heightM ?? 0,
+  totalCapacity: w.totalCapacity ?? 0,
+  occupied,
+  capacityBox: w.capacityBox ?? 0,
+  capacitySack: w.capacitySack ?? 0,
+  capacityCarton: w.capacityCarton ?? 0,
+  chambers: chamberCount,
+  notes: w.notes ?? "",
+});
+
+const mapCH = (c: BackendChamber): CHView => ({
+  id: c.id,
+  warehouseId: c.warehouseId,
+  code: c.code,
+  name: c.arName || c.name,
+  storageType: c.storageType,
+  temp: c.temperatureMin ?? 0,
+  tempMin: c.temperatureMin ?? 0,
+  tempMax: c.temperatureMax ?? 0,
+  cells: c.capacity ?? 0,
+  rowsCount: c.rowsCount ?? 0,
+  columnsCount: c.columnsCount ?? 0,
+  occupied: c.currentOccupancy ?? 0,
+  length: c.lengthM ?? 0,
+  width: c.widthM ?? 0,
+  height: c.heightM ?? 0,
+  capacityWeight: c.capacityWeightTon ?? 0,
+  capacityBox: c.capacityBox ?? 0,
+  capacitySack: c.capacitySack ?? 0,
+  capacityCarton: c.capacityCarton ?? 0,
+  notes: c.notes ?? "",
+});
 
 const opStatusColors: Record<string, string> = {
   تشغيل: "bg-green-100 text-green-700 border-green-200",
@@ -102,7 +205,11 @@ const defaultWH = {
 const defaultCH = {
   storageType: "",
   temp: "",
+  tempMin: "",
+  tempMax: "",
   cells: "",
+  rowsCount: "",
+  columnsCount: "",
   length: "",
   width: "",
   height: "",
@@ -114,21 +221,44 @@ const defaultCH = {
 };
 
 export function Warehouses() {
-  const { warehouses, chambers, updateWarehouse, deleteWarehouse, deleteChamber } = useDb();
   const { confirmDelete, dialog: confirmDialog } = useConfirmDelete();
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [rawWarehouses, setRawWarehouses] = useState<BackendWarehouse[]>([]);
+  const [rawChambers, setRawChambers] = useState<BackendChamber[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const [whs, chs] = await Promise.all([getAllWarehouses(1, 100), getChambers()]);
+      setRawWarehouses(whs);
+      setRawChambers(chs);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحميل بيانات الثلاجات");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void reload(); }, []);
+
+  const chambers = useMemo<CHView[]>(() => rawChambers.filter(c => c.isActive).map(mapCH), [rawChambers]);
+  const warehouses = useMemo<WHView[]>(() => rawWarehouses.filter(w => w.isActive).map(w => {
+    const wChs = rawChambers.filter(c => c.warehouseId === w.id && c.isActive);
+    const occupied = wChs.reduce((s, c) => s + (c.currentOccupancy ?? 0), 0);
+    return mapWH(w, wChs.length, occupied);
+  }), [rawWarehouses, rawChambers]);
+
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [showAddWH, setShowAddWH] = useState(false);
-  const [showAddCH, setShowAddCH] = useState<number | null>(
-    null,
-  );
+  const [showAddCH, setShowAddCH] = useState<string | null>(null);
   const [newWH, setNewWH] = useState({ ...defaultWH });
   const [newCH, setNewCH] = useState({ ...defaultCH });
   const [view, setView] = useState<"grid" | "list">("list");
   const [search, setSearch] = useState("");
 
   /* ── Edit Warehouse State ── */
-  type WHRow = (typeof warehouses)[number];
-  const [editWH, setEditWH] = useState(null as WHRow | null);
+  type WHRow = WHView;
+  const [editWH, setEditWH] = useState<WHRow | null>(null);
   const [editWHForm, setEditWHForm] = useState({ ...defaultWH });
 
   const openEditWH = (wh: WHRow) => {
@@ -153,43 +283,194 @@ export function Warehouses() {
     });
   };
 
-  const handleSaveEditWH = () => {
+  const num = (v: string) => v === "" || v == null ? undefined : Number(v);
+
+  const handleSaveEditWH = async () => {
     if (!editWH) return;
     if (!editWHForm.letter || !editWHForm.name) {
       toast.error("يرجى إدخال حرف الثلاجة والاسم");
       return;
     }
-    updateWarehouse(editWH.id, {
-      letter: editWHForm.letter,
-      name: editWHForm.name,
-      storageType: editWHForm.storageType,
-      machineStatus: editWHForm.operationStatus,
-      machineType: editWHForm.machineType,
-      machinePower: Number(editWHForm.machinePower) || 0,
-      dailyRent: Number(editWHForm.dailyRent) || 0,
-      monthlyRent: Number(editWHForm.monthlyRent) || 0,
-      notes: editWHForm.notes,
-    });
-    toast.success(`تم تحديث بيانات ثلاجة "${editWHForm.name}" بنجاح`);
-    setEditWH(null);
+    try {
+      await apiEditWarehouse({
+        id: editWH.id,
+        code: editWH.code,
+        name: editWHForm.name,
+        arName: editWHForm.name,
+        storageType: editWHForm.storageType,
+        operationStatus: editWHForm.operationStatus,
+        lengthM: num(editWHForm.length),
+        widthM: num(editWHForm.width),
+        heightM: num(editWHForm.height),
+        totalCapacity: num(editWHForm.capacityWeight),
+        capacityBox: num(editWHForm.capacityBox),
+        capacitySack: num(editWHForm.capacitySack),
+        capacityCarton: num(editWHForm.capacityCarton),
+        machineType: editWHForm.machineType,
+        machinePower: num(editWHForm.machinePower),
+        dailyRent: num(editWHForm.dailyRent),
+        monthlyRent: num(editWHForm.monthlyRent),
+        notes: editWHForm.notes,
+        isActive: true,
+      });
+      toast.success(`تم تحديث بيانات ثلاجة "${editWHForm.name}" بنجاح`);
+      setEditWH(null);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحديث الثلاجة");
+    }
   };
 
-  const toggleExpand = (id: number) =>
+  const toggleExpand = (id: string) =>
     setExpanded(expanded === id ? null : id);
 
-  const handleAddWH = () => {
+  const handleAddWH = async () => {
     if (!newWH.letter || !newWH.name) {
       toast.error("يرجى إدخال حرف الثلاجة والاسم");
       return;
     }
-    toast.success("تم إضافة الثلاجة بنجاح");
-    setShowAddWH(false);
-    setNewWH({ ...defaultWH });
+    try {
+      await apiAddWarehouse({
+        code: `F-${newWH.letter}`,
+        name: newWH.name,
+        arName: newWH.name,
+        storageType: newWH.storageType || "تبريد",
+        operationStatus: newWH.operationStatus || "تشغيل",
+        lengthM: num(newWH.length),
+        widthM: num(newWH.width),
+        heightM: num(newWH.height),
+        totalCapacity: num(newWH.capacityWeight),
+        capacityBox: num(newWH.capacityBox),
+        capacitySack: num(newWH.capacitySack),
+        capacityCarton: num(newWH.capacityCarton),
+        machineType: newWH.machineType,
+        machinePower: num(newWH.machinePower),
+        dailyRent: num(newWH.dailyRent),
+        monthlyRent: num(newWH.monthlyRent),
+        notes: newWH.notes,
+      });
+      toast.success("تم إضافة الثلاجة بنجاح");
+      setShowAddWH(false);
+      setNewWH({ ...defaultWH });
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل إضافة الثلاجة");
+    }
   };
-  const handleAddCH = () => {
-    toast.success("تم إضافة العنبر بنجاح");
-    setShowAddCH(null);
-    setNewCH({ ...defaultCH });
+  const handleAddCH = async () => {
+    if (!showAddCH) return;
+    const wh = warehouses.find(w => w.id === showAddCH);
+    if (!wh) return;
+    const nextNum = chambers.filter(c => c.warehouseId === showAddCH).length + 1;
+    const code = `${wh.letter}-${nextNum}`;
+    const tMin = newCH.tempMin !== "" ? num(newCH.tempMin) : num(newCH.temp);
+    const tMax = newCH.tempMax !== "" ? num(newCH.tempMax) : num(newCH.temp);
+    try {
+      await apiAddChamber({
+        warehouseId: showAddCH,
+        code,
+        name: `عنبر ${code}`,
+        arName: `عنبر ${code}`,
+        storageType: newCH.storageType || wh.storageType || "تبريد",
+        temperatureMin: tMin,
+        temperatureMax: tMax,
+        capacity: num(newCH.cells),
+        rowsCount: num(newCH.rowsCount),
+        columnsCount: num(newCH.columnsCount),
+        lengthM: num(newCH.length),
+        widthM: num(newCH.width),
+        heightM: num(newCH.height),
+        capacityWeightTon: num(newCH.capacityWeight),
+        capacityBox: num(newCH.capacityBox),
+        capacitySack: num(newCH.capacitySack),
+        capacityCarton: num(newCH.capacityCarton),
+        notes: newCH.notes,
+      });
+      toast.success("تم إضافة العنبر بنجاح");
+      setShowAddCH(null);
+      setNewCH({ ...defaultCH });
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل إضافة العنبر");
+    }
+  };
+
+  /* ── Edit Chamber ── */
+  const [editCH, setEditCH] = useState<CHView | null>(null);
+  const [editCHForm, setEditCHForm] = useState({ ...defaultCH });
+
+  const openEditCH = (ch: CHView) => {
+    setEditCH(ch);
+    setEditCHForm({
+      storageType: ch.storageType,
+      temp: String(ch.tempMin ?? ""),
+      tempMin: String(ch.tempMin ?? ""),
+      tempMax: String(ch.tempMax ?? ""),
+      cells: String(ch.cells ?? ""),
+      rowsCount: String(ch.rowsCount ?? ""),
+      columnsCount: String(ch.columnsCount ?? ""),
+      length: String(ch.length ?? ""),
+      width: String(ch.width ?? ""),
+      height: String(ch.height ?? ""),
+      capacityWeight: String(ch.capacityWeight ?? ""),
+      capacityBox: String(ch.capacityBox ?? ""),
+      capacitySack: String(ch.capacitySack ?? ""),
+      capacityCarton: String(ch.capacityCarton ?? ""),
+      notes: ch.notes ?? "",
+    });
+  };
+
+  const handleSaveEditCH = async () => {
+    if (!editCH) return;
+    try {
+      await apiEditChamber({
+        id: editCH.id,
+        code: editCH.code,
+        name: editCH.name || editCH.code,
+        arName: editCH.name || editCH.code,
+        storageType: editCHForm.storageType || editCH.storageType,
+        temperatureMin: num(editCHForm.tempMin),
+        temperatureMax: num(editCHForm.tempMax),
+        capacity: num(editCHForm.cells),
+        rowsCount: num(editCHForm.rowsCount),
+        columnsCount: num(editCHForm.columnsCount),
+        lengthM: num(editCHForm.length),
+        widthM: num(editCHForm.width),
+        heightM: num(editCHForm.height),
+        capacityWeightTon: num(editCHForm.capacityWeight),
+        capacityBox: num(editCHForm.capacityBox),
+        capacitySack: num(editCHForm.capacitySack),
+        capacityCarton: num(editCHForm.capacityCarton),
+        notes: editCHForm.notes,
+        isActive: true,
+      });
+      toast.success(`تم تحديث العنبر "${editCH.code}" بنجاح`);
+      setEditCH(null);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحديث العنبر");
+    }
+  };
+
+  const handleDeleteWH = async (wh: WHRow) => {
+    try {
+      await apiDeleteWarehouse(wh.id);
+      if (expanded === wh.id) setExpanded(null);
+      toast.success(`تم حذف ثلاجة "${wh.name}" بنجاح`);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حذف الثلاجة");
+    }
+  };
+
+  const handleDeleteCH = async (ch: CHView) => {
+    try {
+      await apiDeleteChamber(ch.id);
+      toast.success(`تم حذف العنبر "${ch.code}" بنجاح`);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حذف العنبر");
+    }
   };
 
   const filtered = warehouses.filter(w =>
@@ -298,7 +579,7 @@ export function Warehouses() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {filtered.map((wh) => (
-                    <motion.div key={wh.id} variants={anim}>
+                    <motion.div key={wh.id} variants={row}>
                       <Card className="border-0 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
                         <CardContent className="p-5">
                           <div className="text-center mb-4">
@@ -340,10 +621,7 @@ export function Warehouses() {
                             <button
                               className="flex items-center gap-1 text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded transition-colors"
                               onClick={() =>
-                                confirmDelete(wh.name, () => {
-                                  deleteWarehouse(wh.id);
-                                  toast.success(`تم حذف ثلاجة "${wh.name}" بنجاح`);
-                                }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
+                                confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
                               }
                             >
                               <Trash2 className="w-3.5 h-3.5" />حذف
@@ -551,11 +829,7 @@ export function Warehouses() {
                           className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"
                           title="حذف الثلاجة"
                           onClick={() =>
-                            confirmDelete(wh.name, () => {
-                              deleteWarehouse(wh.id);
-                              if (expanded === wh.id) setExpanded(null);
-                              toast.success(`تم حذف ثلاجة "${wh.name}" بنجاح`);
-                            }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
+                            confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
                           }
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -631,11 +905,15 @@ export function Warehouses() {
                                         {ch.temp}°م
                                       </span>
                                       <button
+                                        onClick={() => openEditCH(ch)}
+                                        className="p-1 rounded bg-white/10 hover:bg-white/25 text-white/80 hover:text-white transition-colors"
+                                        title="تعديل العنبر"
+                                      >
+                                        <Edit className="w-3 h-3" />
+                                      </button>
+                                      <button
                                         onClick={() =>
-                                          confirmDelete(ch.code, () => {
-                                            deleteChamber(ch.id);
-                                            toast.success(`تم حذف العنبر "${ch.code}" بنجاح`);
-                                          }, { title: "حذف العنبر", description: `سيتم حذف العنبر "${ch.code}" نهائياً.` })
+                                          confirmDelete(ch.code, () => { void handleDeleteCH(ch); }, { title: "حذف العنبر", description: `سيتم حذف العنبر "${ch.code}" نهائياً.` })
                                         }
                                         className="p-1 rounded bg-white/10 hover:bg-white/25 text-white/80 hover:text-white transition-colors"
                                         title="حذف العنبر"
@@ -1228,17 +1506,58 @@ export function Warehouses() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>درجة الحرارة (°م)</Label>
+                <Label>درجة الحرارة الدنيا (°م)</Label>
+                <Input
+                  type="number"
+                  placeholder="مثال: -22"
+                  dir="rtl"
+                  className="border border-gray-300"
+                  value={newCH.tempMin}
+                  onChange={(e) =>
+                    setNewCH({ ...newCH, tempMin: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>درجة الحرارة العليا (°م)</Label>
                 <Input
                   type="number"
                   placeholder="مثال: -18"
                   dir="rtl"
                   className="border border-gray-300"
-                  value={newCH.temp}
+                  value={newCH.tempMax}
                   onChange={(e) =>
-                    setNewCH({ ...newCH, temp: e.target.value })
+                    setNewCH({ ...newCH, tempMax: e.target.value })
                   }
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label>الصفوف × الأعمدة</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    placeholder="صف"
+                    dir="rtl"
+                    className="border border-gray-300"
+                    value={newCH.rowsCount}
+                    onChange={(e) =>
+                      setNewCH({ ...newCH, rowsCount: e.target.value })
+                    }
+                  />
+                  <span className="text-gray-400">×</span>
+                  <Input
+                    type="number"
+                    placeholder="عمود"
+                    dir="rtl"
+                    className="border border-gray-300"
+                    value={newCH.columnsCount}
+                    onChange={(e) =>
+                      setNewCH({ ...newCH, columnsCount: e.target.value })
+                    }
+                  />
+                </div>
               </div>
             </div>
 
@@ -1421,6 +1740,144 @@ export function Warehouses() {
             >
               إلغاء
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════════════════════════════════════════════════
+        Edit chamber dialog
+      ══════════════════════════════════════════════════════════════ */}
+      <Dialog open={editCH !== null} onOpenChange={() => setEditCH(null)}>
+        <DialogContent dir="rtl" className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              تعديل العنبر
+              {editCH && (
+                <Badge className="bg-blue-100 text-blue-700 border-0 mr-1">
+                  {editCH.code}
+                </Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>نوع التخزين</Label>
+                <Select value={editCHForm.storageType} onValueChange={v => setEditCHForm({ ...editCHForm, storageType: v })}>
+                  <SelectTrigger dir="rtl" className="border border-gray-300 bg-white">
+                    <SelectValue placeholder="اختر نوع التخزين" />
+                  </SelectTrigger>
+                  <SelectContent dir="rtl">
+                    <SelectItem value="تجميد">تجميد</SelectItem>
+                    <SelectItem value="تبريد">تبريد</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>درجة الحرارة الدنيا (°م)</Label>
+                <Input type="number" dir="rtl" className="border border-gray-300"
+                  value={editCHForm.tempMin}
+                  onChange={e => setEditCHForm({ ...editCHForm, tempMin: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>درجة الحرارة العليا (°م)</Label>
+                <Input type="number" dir="rtl" className="border border-gray-300"
+                  value={editCHForm.tempMax}
+                  onChange={e => setEditCHForm({ ...editCHForm, tempMax: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>الصفوف × الأعمدة</Label>
+                <div className="flex items-center gap-2">
+                  <Input type="number" placeholder="صف" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.rowsCount}
+                    onChange={e => setEditCHForm({ ...editCHForm, rowsCount: e.target.value })} />
+                  <span className="text-gray-400">×</span>
+                  <Input type="number" placeholder="عمود" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.columnsCount}
+                    onChange={e => setEditCHForm({ ...editCHForm, columnsCount: e.target.value })} />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">الأبعاد</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label>الطول (م)</Label>
+                  <Input type="number" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.length}
+                    onChange={e => setEditCHForm({ ...editCHForm, length: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>العرض (م)</Label>
+                  <Input type="number" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.width}
+                    onChange={e => setEditCHForm({ ...editCHForm, width: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>الارتفاع (م)</Label>
+                  <Input type="number" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.height}
+                    onChange={e => setEditCHForm({ ...editCHForm, height: e.target.value })} />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>عدد المربعات</Label>
+                <Input type="number" dir="rtl" className="border border-gray-300"
+                  value={editCHForm.cells}
+                  onChange={e => setEditCHForm({ ...editCHForm, cells: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>السعة بالوزن (طن)</Label>
+                <Input type="number" dir="rtl" className="border border-gray-300"
+                  value={editCHForm.capacityWeight}
+                  onChange={e => setEditCHForm({ ...editCHForm, capacityWeight: e.target.value })} />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">السعة بالعبوات</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label>طرد</Label>
+                  <Input type="number" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.capacityBox}
+                    onChange={e => setEditCHForm({ ...editCHForm, capacityBox: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>شوال</Label>
+                  <Input type="number" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.capacitySack}
+                    onChange={e => setEditCHForm({ ...editCHForm, capacitySack: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>كرتونة</Label>
+                  <Input type="number" dir="rtl" className="border border-gray-300"
+                    value={editCHForm.capacityCarton}
+                    onChange={e => setEditCHForm({ ...editCHForm, capacityCarton: e.target.value })} />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Textarea dir="rtl" rows={2} className="resize-none border border-gray-300"
+                value={editCHForm.notes}
+                onChange={e => setEditCHForm({ ...editCHForm, notes: e.target.value })} />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 flex-row-reverse">
+            <Button onClick={handleSaveEditCH} className="bg-blue-600 hover:bg-blue-700 text-white">
+              حفظ التعديلات
+            </Button>
+            <Button variant="outline" onClick={() => setEditCH(null)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

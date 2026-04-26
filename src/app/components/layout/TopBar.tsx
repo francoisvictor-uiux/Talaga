@@ -9,6 +9,22 @@ import {
   DropdownMenuTrigger
 } from "../ui/dropdown-menu";
 import { useNavigate, useLocation } from "react-router";
+import { useAuth } from "../../context/AuthContext";
+
+const ROLE_LABELS: Record<string, string> = {
+  Admin: "مدير النظام",
+  Manager: "مدير",
+  Warehouse: "عامل مخزن",
+  Accountant: "محاسب",
+  Viewer: "مشاهدة فقط",
+};
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "؟";
+  if (parts.length === 1) return parts[0].slice(0, 2);
+  return parts[0][0] + parts[1][0];
+}
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "لوحة التحكم",
@@ -28,7 +44,17 @@ const pageTitles: Record<string, string> = {
 export function TopBar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
   const title = pageTitles[location.pathname] || "نظام مخازن التبريد";
+
+  const displayName = user?.arName?.trim() || user?.fullName || "مستخدم";
+  const roleLabel = user?.roles?.[0] ? (ROLE_LABELS[user.roles[0]] ?? user.roles[0]) : "";
+  const initials = getInitials(displayName);
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
 
   return (
     <header className="h-16 bg-white border-b border-gray-200 flex items-center px-6 gap-4 flex-shrink-0 z-30">
@@ -90,11 +116,11 @@ export function TopBar() {
         <DropdownMenuTrigger asChild>
           <button className="flex items-center gap-2 hover:bg-gray-50 rounded-lg px-2 py-1.5 transition-colors">
             <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-semibold">أم</span>
+              <span className="text-white text-xs font-semibold">{initials}</span>
             </div>
             <div className="hidden md:block text-right">
-              <p className="text-sm font-medium text-gray-800 leading-tight">أحمد محمد</p>
-              <p className="text-xs text-gray-500 leading-tight">مدير النظام</p>
+              <p className="text-sm font-medium text-gray-800 leading-tight">{displayName}</p>
+              {roleLabel && <p className="text-xs text-gray-500 leading-tight">{roleLabel}</p>}
             </div>
             <ChevronDown className="w-4 h-4 text-gray-400 hidden md:block" />
           </button>
@@ -107,7 +133,7 @@ export function TopBar() {
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-red-600 focus:text-red-600"
-            onClick={() => navigate("/login")}
+            onClick={handleLogout}
           >
             تسجيل الخروج
           </DropdownMenuItem>

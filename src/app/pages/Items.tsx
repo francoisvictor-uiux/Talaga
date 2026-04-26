@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   Plus, Edit, Trash2, Snowflake, Thermometer, Wind,
@@ -15,12 +15,61 @@ import { Pagination, usePagination } from "../components/ui/Pagination";
 import { useConfirmDelete } from "../components/ui/ConfirmDialog";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
-import { useDb } from "../context/DbContext";
 import { useTheme } from "../context/ThemeContext";
+import {
+  getAllItems, getAllPackages,
+  addItem as apiAddItem, editItem as apiEditItem, deleteItem as apiDeleteItem,
+  addPackage as apiAddPkg, editPackage as apiEditPkg, deletePackage as apiDeletePkg,
+  type BackendItem, type BackendPackage,
+} from "../services/itemService";
 
-/* ─── types ─── */
-type Item = ReturnType<typeof useDb>["items"][0];
-type Pkg  = ReturnType<typeof useDb>["packages"][0];
+/* ─── view shapes ─── */
+type Item = {
+  id: string;
+  prefix: string;
+  code: string;
+  name: string;
+  storageType: string;
+  maxDays: number;
+  alertDays: number;
+  status: "active" | "inactive";
+  image: string;
+};
+type Pkg = {
+  id: string;
+  code: string;
+  type: string;
+  weight: number;
+  length: number;
+  width: number;
+  height: number;
+  status: "active" | "inactive";
+  image: string;
+};
+
+const itemFromBackend = (i: BackendItem): Item => ({
+  id: i.id,
+  prefix: i.prefix ?? "",
+  code: i.code,
+  name: i.arName || i.name,
+  storageType: i.storageType,
+  maxDays: i.shelfLifeDays ?? 0,
+  alertDays: i.alertDaysBeforeExpiry ?? 0,
+  status: i.isActive ? "active" : "inactive",
+  image: i.imageUrl ?? "",
+});
+
+const pkgFromBackend = (p: BackendPackage): Pkg => ({
+  id: p.id,
+  code: p.code,
+  type: p.packageType ?? p.arName ?? p.name,
+  weight: p.emptyWeightKg ?? 0,
+  length: p.lengthCm ?? 0,
+  width: p.widthCm ?? 0,
+  height: p.heightCm ?? 0,
+  status: p.isActive ? "active" : "inactive",
+  image: p.imageUrl ?? "",
+});
 
 /* ─── storage config ─── */
 const storageConfig: Record<string, { badge: string; icon: React.ElementType; grad: string }> = {
@@ -221,7 +270,22 @@ function ViewToggle({ view, setView }: { view: "grid" | "list"; setView: (v: "gr
    Main Component
 ══════════════════════════════════════════════════════════ */
 export function Items() {
-  const { items, packages, addItem, deleteItem, updateItem, addPackage, deletePackage, updatePackage } = useDb();
+  const [rawItems, setRawItems] = useState<BackendItem[]>([]);
+  const [rawPkgs, setRawPkgs] = useState<BackendPackage[]>([]);
+  const items = useMemo(() => rawItems.map(itemFromBackend), [rawItems]);
+  const packages = useMemo(() => rawPkgs.map(pkgFromBackend), [rawPkgs]);
+
+  const reload = async () => {
+    try {
+      const [its, pks] = await Promise.all([getAllItems(1, 200), getAllPackages(1, 200)]);
+      setRawItems(its);
+      setRawPkgs(pks);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحميل البيانات");
+    }
+  };
+  useEffect(() => { void reload(); }, []);
+
   const { theme } = useTheme();
   const [itemView, setItemView] = useState<"grid" | "list">("grid");
   const [pkgView,  setPkgView]  = useState<"grid" | "list">("grid");
@@ -284,72 +348,124 @@ export function Items() {
     });
   };
 
+  const num = (v: string) => v === "" || v == null ? undefined : Number(v);
+
   /* Save edit — Item */
-  const handleSaveEditItem = () => {
+  const handleSaveEditItem = async () => {
     if (!editItem) return;
     if (!editItemForm.name || !editItemForm.storageType) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
-    updateItem(editItem.id, {
-      prefix: editItemForm.prefix,
-      code: editItemForm.code,
-      name: editItemForm.name,
-      storageType: editItemForm.storageType,
-      maxDays: Number(editItemForm.maxDays) || 30,
-      alertDays: Number(editItemForm.alertDays) || 3,
-      image: editItemForm.image,
-    });
-    toast.success(`تم تحديث الصنف "${editItemForm.name}" بنجاح`);
-    setEditItem(null);
+    try {
+      await apiEditItem({
+        id: editItem.id,
+        code: editItemForm.code || editItem.code,
+        prefix: editItemForm.prefix,
+        name: editItemForm.name,
+        arName: editItemForm.name,
+        storageType: editItemForm.storageType,
+        shelfLifeDays: num(editItemForm.maxDays),
+        alertDaysBeforeExpiry: num(editItemForm.alertDays),
+        imageUrl: editItemForm.image || undefined,
+        isActive: true,
+      });
+      toast.success(`تم تحديث الصنف "${editItemForm.name}" بنجاح`);
+      setEditItem(null);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل التحديث");
+    }
   };
 
   /* Save edit — Package */
-  const handleSaveEditPkg = () => {
+  const handleSaveEditPkg = async () => {
     if (!editPkg) return;
     if (!editPkgForm.type) { toast.error("يرجى اختيار نوع العبوة"); return; }
-    updatePackage(editPkg.id, {
-      code: editPkgForm.code,
-      type: editPkgForm.type,
-      weight: Number(editPkgForm.weight) || 0,
-      length: Number(editPkgForm.length) || 0,
-      width: Number(editPkgForm.width) || 0,
-      height: Number(editPkgForm.height) || 0,
-      image: editPkgForm.image,
-    });
-    toast.success(`تم تحديث العبوة "${editPkgForm.type}" بنجاح`);
-    setEditPkg(null);
+    try {
+      await apiEditPkg({
+        id: editPkg.id,
+        code: editPkgForm.code || editPkg.code,
+        name: editPkgForm.type,
+        arName: editPkgForm.type,
+        packageType: editPkgForm.type,
+        emptyWeightKg: num(editPkgForm.weight),
+        lengthCm: num(editPkgForm.length),
+        widthCm: num(editPkgForm.width),
+        heightCm: num(editPkgForm.height),
+        imageUrl: editPkgForm.image || undefined,
+        isActive: true,
+      });
+      toast.success(`تم تحديث العبوة "${editPkgForm.type}" بنجاح`);
+      setEditPkg(null);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل التحديث");
+    }
   };
 
-  /* Handlers */
-  const handleSaveItem = () => {
+  /* Add Item */
+  const handleSaveItem = async () => {
     if (!newItem.name || !newItem.storageType) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
-    addItem({
-      prefix: newItem.prefix,
-      code: newItem.code || `${newItem.prefix}-${String(items.length + 1).padStart(3, "0")}`,
-      name: newItem.name,
-      storageType: newItem.storageType,
-      maxDays: Number(newItem.maxDays) || 30,
-      alertDays: Number(newItem.alertDays) || 3,
-      status: "active",
-      image: newItem.image,
-    });
-    toast.success(`تم إضافة الصنف "${newItem.name}" بنجاح`);
-    setShowAddItem(false);
-    setNewItem({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
+    try {
+      await apiAddItem({
+        code: newItem.code || `${newItem.prefix}-${String(items.length + 1).padStart(3, "0")}`,
+        prefix: newItem.prefix,
+        name: newItem.name,
+        arName: newItem.name,
+        storageType: newItem.storageType,
+        shelfLifeDays: num(newItem.maxDays) ?? 30,
+        alertDaysBeforeExpiry: num(newItem.alertDays) ?? 3,
+        imageUrl: newItem.image || undefined,
+      });
+      toast.success(`تم إضافة الصنف "${newItem.name}" بنجاح`);
+      setShowAddItem(false);
+      setNewItem({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل الإضافة");
+    }
   };
-  const handleSavePkg = () => {
+
+  /* Add Package */
+  const handleSavePkg = async () => {
     if (!newPkg.type) { toast.error("يرجى اختيار نوع العبوة"); return; }
-    addPackage({
-      code: newPkg.code || `P${String(packages.length + 1).padStart(3, "0")}`,
-      type: newPkg.type,
-      weight: Number(newPkg.weight) || 0,
-      length: Number(newPkg.length) || 0,
-      width: Number(newPkg.width) || 0,
-      height: Number(newPkg.height) || 0,
-      status: "active",
-      image: newPkg.image,
-    });
-    toast.success(`تم إضافة العبوة "${newPkg.type}" بنجاح`);
-    setShowAddPkg(false);
-    setNewPkg({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
+    try {
+      await apiAddPkg({
+        code: newPkg.code || `P${String(packages.length + 1).padStart(3, "0")}`,
+        name: newPkg.type,
+        arName: newPkg.type,
+        packageType: newPkg.type,
+        emptyWeightKg: num(newPkg.weight) ?? 0,
+        lengthCm: num(newPkg.length) ?? 0,
+        widthCm: num(newPkg.width) ?? 0,
+        heightCm: num(newPkg.height) ?? 0,
+        imageUrl: newPkg.image || undefined,
+      });
+      toast.success(`تم إضافة العبوة "${newPkg.type}" بنجاح`);
+      setShowAddPkg(false);
+      setNewPkg({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل الإضافة");
+    }
+  };
+
+  /* Delete handlers */
+  const handleDeleteItem = async (it: Item) => {
+    try {
+      await apiDeleteItem(it.id);
+      toast.success(`تم حذف "${it.name}"`);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل الحذف");
+    }
+  };
+  const handleDeletePkg = async (pkg: Pkg) => {
+    try {
+      await apiDeletePkg(pkg.id);
+      toast.success(`تم حذف عبوة "${pkg.type}"`);
+      await reload();
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل الحذف");
+    }
   };
 
   return (
@@ -414,7 +530,7 @@ export function Items() {
                           key={it.id}
                           it={it}
                           onEdit={openEditItem}
-                          onDelete={it => confirmDelete(it.name, () => { deleteItem(it.id); toast.success(`تم حذف "${it.name}"`); })}
+                          onDelete={it => confirmDelete(it.name, () => { void handleDeleteItem(it); })}
                         />
                       ))}
                     </div>
@@ -502,7 +618,7 @@ export function Items() {
                                   >
                                     <Edit className="w-3.5 h-3.5" />
                                   </button>
-                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(it.name, () => { deleteItem(it.id); toast.success(`تم حذف "${it.name}"`); })}><Trash2 className="w-3.5 h-3.5" /></button>
+                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(it.name, () => { void handleDeleteItem(it); })}><Trash2 className="w-3.5 h-3.5" /></button>
                                 </div>
                               </td>
                             </motion.tr>
@@ -568,7 +684,7 @@ export function Items() {
                           key={pkg.id}
                           pkg={pkg}
                           onEdit={openEditPkg}
-                          onDelete={pkg => confirmDelete(pkg.type, () => { deletePackage(pkg.id); toast.success(`تم حذف عبوة "${pkg.type}"`); })}
+                          onDelete={pkg => confirmDelete(pkg.type, () => { void handleDeletePkg(pkg); })}
                         />
                       ))}
                     </div>
@@ -631,7 +747,7 @@ export function Items() {
                                   >
                                     <Edit className="w-3.5 h-3.5" />
                                   </button>
-                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(pkg.type, () => { deletePackage(pkg.id); toast.success(`تم حذف عبوة "${pkg.type}"`); })}><Trash2 className="w-3.5 h-3.5" /></button>
+                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(pkg.type, () => { void handleDeletePkg(pkg); })}><Trash2 className="w-3.5 h-3.5" /></button>
                                 </div>
                               </td>
                             </tr>

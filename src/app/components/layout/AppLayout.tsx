@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Outlet } from "react-router";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
-import { Toaster } from "../ui/sonner";
 
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
@@ -19,7 +18,6 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
-      <Toaster position="top-left" richColors dir="rtl" />
     </div>
   );
 }

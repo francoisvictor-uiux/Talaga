@@ -1,5 +1,6 @@
 import { createHashRouter, Navigate } from "react-router";
 import { AppLayout } from "./components/layout/AppLayout";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 import { Warehouses } from "./pages/Warehouses";
@@ -26,21 +27,27 @@ export const router = createHashRouter([
   },
   {
     path: "/",
-    Component: AppLayout,
+    Component: ProtectedRoute,
     children: [
-      { path: "dashboard", Component: Dashboard },
-      { path: "warehouses", Component: Warehouses },
-      { path: "items", Component: Items },
-      { path: "customers", Component: Customers },
-      { path: "employees", Component: Employees },
-      { path: "movements", Component: Movements },
-      { path: "inventory", Component: Inventory },
-      { path: "reports", Component: Reports },
-      { path: "tasks", Component: TodoList },
-      { path: "audit", Component: AuditLog },
-      { path: "accounts", Component: AccountsPage },
-      { path: "cashier", Component: CashierPage },
-      { path: "settings", Component: Settings },
+      {
+        path: "/",
+        Component: AppLayout,
+        children: [
+          { path: "dashboard", Component: Dashboard },
+          { path: "warehouses", Component: Warehouses },
+          { path: "items", Component: Items },
+          { path: "customers", Component: Customers },
+          { path: "employees", Component: Employees },
+          { path: "movements", Component: Movements },
+          { path: "inventory", Component: Inventory },
+          { path: "reports", Component: Reports },
+          { path: "tasks", Component: TodoList },
+          { path: "audit", Component: AuditLog },
+          { path: "accounts", Component: AccountsPage },
+          { path: "cashier", Component: CashierPage },
+          { path: "settings", Component: Settings },
+        ],
+      },
     ],
   },
 ]);

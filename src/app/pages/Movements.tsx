@@ -1,5 +1,14 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import {
+  addMovement,
+  getAllMovements,
+  type BackendMovement,
+} from "../services/movementService";
+import { getAllCustomers, type BackendCustomer } from "../services/customerService";
+import { getAllItems, getAllPackages, type BackendItem, type BackendPackage } from "../services/itemService";
+import { getAllWarehouses, type BackendWarehouse } from "../services/warehouseService";
+import { getAllEmployees, type BackendEmployee } from "../services/employeeService";
 import {
   Plus, Trash2, Printer, Save,
   PackagePlus, PackageMinus, ArrowLeftRight, AlertCircle,
@@ -108,8 +117,55 @@ const TYPE_DOT: Record<MovementRecord["type"], string> = {
   transfers: "bg-orange-500",
 };
 
+const TYPE_BACKEND_TO_FRONT: Record<string, MovementRecord["type"]> = {
+  Incoming: "incoming",
+  Outgoing: "outgoing",
+  Transfer: "transfers",
+};
+
+const mapMovement = (m: BackendMovement): MovementRecord => {
+  const type = (TYPE_BACKEND_TO_FRONT[m.movementType] ?? "incoming") as MovementRecord["type"];
+  const warehouse =
+    type === "outgoing"
+      ? (m.fromWarehouseName || "—")
+      : (m.toWarehouseName || m.fromWarehouseName || "—");
+  return {
+    id: m.id,
+    type,
+    invoiceNo: m.movementNumber,
+    customer: m.customerArName || m.customerName || "—",
+    item: m.itemArName || m.itemName || "—",
+    quantity: Number(m.quantity ?? 0),
+    weight: m.netWeightKg ?? undefined,
+    naulage: 0,
+    warehouse,
+    date: (m.movementDate ?? "").slice(0, 10),
+    driver: m.driverName ?? undefined,
+    notes: m.notes ?? undefined,
+  };
+};
+
 function IndexTab() {
   const { customers } = useDb();
+
+  const [movements, setMovements] = useState<MovementRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const list = await getAllMovements({ pageIndex: 1, pageSize: 200 });
+        if (!cancelled) setMovements(list.map(mapMovement));
+      } catch (err: any) {
+        if (!cancelled) toast.error(err?.message ?? "فشل تحميل الحركات");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | MovementRecord["type"]>("all");
@@ -119,7 +175,7 @@ function IndexTab() {
   const [showFilters, setShowFilters] = useState(false);
 
   const filtered = useMemo(() => {
-    return MOCK_MOVEMENTS.filter(m => {
+    return movements.filter(m => {
       if (typeFilter !== "all" && m.type !== typeFilter) return false;
       if (customerFilter !== "all" && m.customer !== customerFilter) return false;
       if (dateFrom && m.date < dateFrom) return false;
@@ -136,9 +192,9 @@ function IndexTab() {
       }
       return true;
     });
-  }, [search, typeFilter, customerFilter, dateFrom, dateTo]);
+  }, [movements, search, typeFilter, customerFilter, dateFrom, dateTo]);
 
-  const uniqueCustomers = useMemo(() => [...new Set(MOCK_MOVEMENTS.map(m => m.customer))], []);
+  const uniqueCustomers = useMemo(() => [...new Set(movements.map(m => m.customer))], [movements]);
 
   const totalIncoming = filtered.filter(m => m.type === "incoming").reduce((s, m) => s + m.quantity, 0);
   const totalOutgoing = filtered.filter(m => m.type === "outgoing").reduce((s, m) => s + m.quantity, 0);
@@ -353,82 +409,139 @@ function IndexTab() {
    INCOMING TAB
 ══════════════════════════════════════════════ */
 interface IncomingRow {
-  id: number; item: string; pkg: string; quantity: string;
+  id: number;
+  itemId: string; item: string;
+  packageId: string; pkg: string;
+  quantity: string;
   weight: string; productionDate: string; expiryDate: string;
   serial: string; chamber: string; naulage: string;
 }
 
 interface GratuityDist {
-  employeeId: number; name: string; selected: boolean; amount: string;
+  employeeId: string; name: string; selected: boolean; amount: string;
 }
 
-function IncomingTab() {
-  const { customers, items, packages, warehouses, customerItems, employees, customerDrivers, customerContacts } = useDb();
+const emptyRow = (): IncomingRow => ({
+  id: Date.now() + Math.floor(Math.random() * 1000),
+  itemId: "", item: "", packageId: "", pkg: "",
+  quantity: "", weight: "", productionDate: "", expiryDate: "",
+  serial: "", chamber: "", naulage: "",
+});
 
-  const getNaulage = (customerId: string, itemName: string): number => {
-    if (!customerId) return 0;
-    const specific = customerItems.find(
-      ci => ci.customerId === Number(customerId) && ci.itemName === itemName,
-    );
-    if (specific) return specific.naulage;
-    const cust = customers.find(c => c.id === Number(customerId));
-    return cust?.defaultNaulage ?? 0;
-  };
+function IncomingTab() {
+  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
+  const [items, setItems] = useState<BackendItem[]>([]);
+  const [packages, setPackages] = useState<BackendPackage[]>([]);
+  const [warehouses, setWarehouses] = useState<BackendWarehouse[]>([]);
+  const [employees, setEmployees] = useState<BackendEmployee[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [c, i, p, w, eRes] = await Promise.all([
+          getAllCustomers(1, 200),
+          getAllItems(1, 200),
+          getAllPackages(1, 200),
+          getAllWarehouses(1, 100),
+          getAllEmployees(1, 200),
+        ]);
+        if (cancelled) return;
+        setCustomers(c.filter(x => x.isActive));
+        setItems(i.filter(x => x.isActive));
+        setPackages(p.filter(x => x.isActive));
+        setWarehouses(w.filter(x => x.isActive));
+        setEmployees(eRes.items.filter(x => x.isActive));
+      } catch (err: any) {
+        if (!cancelled) toast.error(err?.message ?? "فشل تحميل البيانات");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState("");
   const [selectedWaPhone, setSelectedWaPhone] = useState("");
   const [temperature, setTemperature] = useState("");
   const [openingFee, setOpeningFee] = useState("");
-  const [rows, setRows] = useState<IncomingRow[]>([
-    { id: 1, item: "", pkg: "", quantity: "", weight: "", productionDate: "", expiryDate: "", serial: "", chamber: "", naulage: "" },
-  ]);
+  const [movementDate, setMovementDate] = useState(new Date().toISOString().split("T")[0]);
+  const [driverName, setDriverName] = useState("");
+  const [vehiclePlate, setVehiclePlate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [rows, setRows] = useState<IncomingRow[]>([emptyRow()]);
+
   const [showGratuity, setShowGratuity] = useState(false);
   const [gratuityTotal, setGratuityTotal] = useState("");
-  const [gratuityDist, setGratuityDist] = useState<GratuityDist[]>(
-    employees.filter(e => e.status === "active").map(e => ({ employeeId: e.id, name: e.name, selected: false, amount: "" })),
-  );
-  const invoiceNo = `INV-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`;
+  const [gratuityDist, setGratuityDist] = useState<GratuityDist[]>([]);
+  useEffect(() => {
+    setGratuityDist(employees.map(e => ({ employeeId: e.id, name: e.arName || e.fullName, selected: false, amount: "" })));
+  }, [employees]);
 
-  const addRow = () => setRows(r => [...r, { id: Date.now(), item: "", pkg: "", quantity: "", weight: "", productionDate: "", expiryDate: "", serial: "", chamber: "", naulage: "" }]);
+  const invoiceNo = useMemo(() => `INV-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`, []);
+
+  const addRow = () => setRows(r => [...r, emptyRow()]);
   const removeRow = (id: number) => { if (rows.length > 1) setRows(r => r.filter(x => x.id !== id)); };
-  const updateRow = (id: number, field: keyof IncomingRow, value: string) =>
-    setRows(r => r.map(x => {
-      if (x.id !== id) return x;
-      const updated = { ...x, [field]: value };
-      if (field === "item" && selectedCustomerId) updated.naulage = String(getNaulage(selectedCustomerId, value));
-      return updated;
-    }));
+  const updateRow = (id: number, patch: Partial<IncomingRow>) =>
+    setRows(r => r.map(x => x.id === id ? { ...x, ...patch } : x));
 
   const onCustomerChange = (val: string) => {
     setSelectedCustomerId(val);
-    setRows(r => r.map(x => ({ ...x, naulage: x.item ? String(getNaulage(val, x.item)) : x.naulage })));
-    const cust = customers.find(c => c.id === Number(val));
-    setSelectedWaPhone(cust?.phone || "");
+    const cust = customers.find(c => c.id === val);
+    setSelectedWaPhone(cust?.mobile || cust?.phone || "");
   };
 
-  const customerPhoneOptions = (() => {
+  const customerPhoneOptions = useMemo(() => {
     if (!selectedCustomerId) return [];
-    const cust = customers.find(c => c.id === Number(selectedCustomerId));
+    const cust = customers.find(c => c.id === selectedCustomerId);
     const opts: { label: string; phone: string }[] = [];
-    if (cust?.phone) opts.push({ label: `${cust.name} (رئيسي)`, phone: cust.phone });
-    customerContacts
-      .filter(c => c.customerId === Number(selectedCustomerId))
-      .forEach(c => opts.push({ label: `${c.name}${c.role ? ` — ${c.role}` : ""}`, phone: c.phone }));
-    customerDrivers
-      .filter(d => d.customerId === Number(selectedCustomerId))
-      .forEach(d => opts.push({ label: `${d.name} — سائق`, phone: d.phone }));
+    if (cust?.mobile) opts.push({ label: `${cust.arName || cust.name} (موبايل)`, phone: cust.mobile });
+    if (cust?.phone && cust.phone !== cust.mobile) opts.push({ label: `${cust.arName || cust.name} (هاتف)`, phone: cust.phone });
     return opts;
-  })();
+  }, [selectedCustomerId, customers]);
 
   const totalQty = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
   const totalWeight = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0);
   const totalNaulage = rows.reduce((s, r) => s + (Number(r.naulage) || 0) * (Number(r.quantity) || 0), 0);
 
-  const handleSave = () => {
-    const customerName = customers.find(c => c.id === Number(selectedCustomerId))?.name || "عميل";
-    const msg = `🟢 *وارد جديد*\nرقم الفاتورة: ${invoiceNo}\nالعميل: ${customerName}\nالكمية: ${totalQty.toLocaleString()} طرد\nالوزن: ${totalWeight.toLocaleString()} كجم\nدرجة الحرارة: ${temperature || "—"} °م\nالنولون: ${totalNaulage.toLocaleString()} ج.م\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
-    toast.success(`تم حفظ فاتورة الاستلام ${invoiceNo} بنجاح`);
-    sendWhatsApp(msg, selectedWaPhone);
+  const handleSave = async () => {
+    if (!selectedCustomerId) { toast.error("اختر العميل"); return; }
+    if (!selectedWarehouseId) { toast.error("اختر المخزن المستلم"); return; }
+    const validRows = rows.filter(r => r.itemId && Number(r.quantity) > 0);
+    if (validRows.length === 0) { toast.error("أضف صنف واحد على الأقل بكمية صحيحة"); return; }
+
+    setSaving(true);
+    try {
+      let savedCount = 0;
+      for (const r of validRows) {
+        const num = `${invoiceNo}-${++savedCount}`;
+        await addMovement({
+          movementNumber: num,
+          movementType: "Incoming",
+          movementDate: new Date(movementDate).toISOString(),
+          customerId: selectedCustomerId,
+          itemId: r.itemId,
+          packageId: r.packageId || undefined,
+          toWarehouseId: selectedWarehouseId,
+          quantity: Number(r.quantity),
+          netWeightKg: Number(r.weight) || undefined,
+          unit: "طرد",
+          driverName: driverName || undefined,
+          vehiclePlate: vehiclePlate || undefined,
+          referenceNumber: r.serial || undefined,
+          notes: notes || undefined,
+        });
+      }
+      const customerName = customers.find(c => c.id === selectedCustomerId)?.arName || customers.find(c => c.id === selectedCustomerId)?.name || "عميل";
+      const msg = `🟢 *وارد جديد*\nرقم الفاتورة: ${invoiceNo}\nالعميل: ${customerName}\nالكمية: ${totalQty.toLocaleString()} طرد\nالوزن: ${totalWeight.toLocaleString()} كجم\nدرجة الحرارة: ${temperature || "—"} °م\nالنولون: ${totalNaulage.toLocaleString()} ج.م\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
+      toast.success(`تم حفظ ${savedCount} حركة وارد للفاتورة ${invoiceNo}`);
+      if (selectedWaPhone) sendWhatsApp(msg, selectedWaPhone);
+      setRows([emptyRow()]);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حفظ الحركات");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleGratuitySave = () => {
@@ -458,9 +571,9 @@ function IncomingTab() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <Label>العميل *</Label>
-                <Select onValueChange={onCustomerChange}>
+                <Select value={selectedCustomerId} onValueChange={onCustomerChange}>
                   <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
-                  <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+                  <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name}</SelectItem>)}</SelectContent>
                 </Select>
                 {selectedCustomerId && (
                   <div className="mt-1 space-y-0.5">
@@ -482,27 +595,21 @@ function IncomingTab() {
               </div>
               <div className="space-y-1.5">
                 <Label>التاريخ *</Label>
-                <Input type="date" dir="rtl" defaultValue={new Date().toISOString().split("T")[0]} />
+                <Input type="date" dir="rtl" value={movementDate} onChange={e => setMovementDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>السائق</Label>
-                <Select>
-                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر السائق" /></SelectTrigger>
-                  <SelectContent dir="rtl">
-                    <SelectItem value="1">يوسف عبدالرحمن</SelectItem>
-                    <SelectItem value="2">طارق الحسين</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Input placeholder="اسم السائق" dir="rtl" value={driverName} onChange={e => setDriverName(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>رقم السيارة</Label>
-                <Input placeholder="أ ب ج 1234" dir="rtl" />
+                <Input placeholder="أ ب ج 1234" dir="rtl" value={vehiclePlate} onChange={e => setVehiclePlate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>المخزن المستلم *</Label>
-                <Select>
+                <Select value={selectedWarehouseId} onValueChange={setSelectedWarehouseId}>
                   <SelectTrigger dir="rtl"><SelectValue placeholder="اختر المخزن" /></SelectTrigger>
-                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>)}</SelectContent>
+                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
@@ -511,7 +618,7 @@ function IncomingTab() {
               </div>
               <div className="col-span-2 md:col-span-3 space-y-1.5">
                 <Label>ملاحظات</Label>
-                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} />
+                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} value={notes} onChange={e => setNotes(e.target.value)} />
               </div>
             </div>
           </CardContent>
@@ -540,26 +647,32 @@ function IncomingTab() {
                     <motion.tr key={row.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="border-b hover:bg-gray-50/30 transition-colors">
                       <td className="px-3 py-2 text-gray-500 text-xs">{idx + 1}</td>
                       <td className="px-2 py-1.5">
-                        <Select onValueChange={v => updateRow(row.id, "item", v)}>
+                        <Select value={row.itemId} onValueChange={v => {
+                          const it = items.find(i => i.id === v);
+                          updateRow(row.id, { itemId: v, item: it?.arName || it?.name || "" });
+                        }}>
                           <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="اختر الصنف" /></SelectTrigger>
-                          <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.name}>{i.name}</SelectItem>)}</SelectContent>
+                          <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.id}>{i.arName || i.name}</SelectItem>)}</SelectContent>
                         </Select>
                       </td>
                       <td className="px-2 py-1.5">
-                        <Select onValueChange={v => updateRow(row.id, "pkg", v)}>
+                        <Select value={row.packageId} onValueChange={v => {
+                          const p = packages.find(x => x.id === v);
+                          updateRow(row.id, { packageId: v, pkg: p?.arName || p?.name || p?.packageType || "" });
+                        }}>
                           <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="العبوة" /></SelectTrigger>
-                          <SelectContent dir="rtl">{packages.map(p => <SelectItem key={p.id} value={p.type}>{p.type}</SelectItem>)}</SelectContent>
+                          <SelectContent dir="rtl">{packages.map(p => <SelectItem key={p.id} value={p.id}>{p.arName || p.name || p.packageType}</SelectItem>)}</SelectContent>
                         </Select>
                       </td>
-                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-20" type="number" placeholder="0" dir="rtl" value={row.quantity} onChange={e => updateRow(row.id, "quantity", e.target.value)} /></td>
-                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" type="number" placeholder="0" dir="rtl" value={row.weight} onChange={e => updateRow(row.id, "weight", e.target.value)} /></td>
-                      <td className="px-2 py-1.5"><Input className="h-8 text-xs" type="date" value={row.productionDate} onChange={e => updateRow(row.id, "productionDate", e.target.value)} /></td>
-                      <td className="px-2 py-1.5"><Input className="h-8 text-xs" type="date" value={row.expiryDate} onChange={e => updateRow(row.id, "expiryDate", e.target.value)} /></td>
-                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-28" placeholder="SN-XXXXX" dir="rtl" value={row.serial} onChange={e => updateRow(row.id, "serial", e.target.value)} /></td>
-                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" placeholder="A-1" dir="rtl" value={row.chamber} onChange={e => updateRow(row.id, "chamber", e.target.value)} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-20" type="number" placeholder="0" dir="rtl" value={row.quantity} onChange={e => updateRow(row.id, { quantity: e.target.value })} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" type="number" placeholder="0" dir="rtl" value={row.weight} onChange={e => updateRow(row.id, { weight: e.target.value })} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs" type="date" value={row.productionDate} onChange={e => updateRow(row.id, { productionDate: e.target.value })} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs" type="date" value={row.expiryDate} onChange={e => updateRow(row.id, { expiryDate: e.target.value })} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-28" placeholder="SN-XXXXX" dir="rtl" value={row.serial} onChange={e => updateRow(row.id, { serial: e.target.value })} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" placeholder="A-1" dir="rtl" value={row.chamber} onChange={e => updateRow(row.id, { chamber: e.target.value })} /></td>
                       <td className="px-2 py-1.5 bg-amber-50/50">
                         <div className="flex items-center gap-1">
-                          <Input className="h-8 text-xs w-20 border-amber-200 bg-amber-50" type="number" placeholder="0" dir="rtl" value={row.naulage} onChange={e => updateRow(row.id, "naulage", e.target.value)} />
+                          <Input className="h-8 text-xs w-20 border-amber-200 bg-amber-50" type="number" placeholder="0" dir="rtl" value={row.naulage} onChange={e => updateRow(row.id, { naulage: e.target.value })} />
                           {row.naulage && <span className="text-xs text-amber-600">=&nbsp;{((Number(row.naulage)||0)*(Number(row.quantity)||0)).toLocaleString()}</span>}
                         </div>
                       </td>
@@ -615,8 +728,8 @@ function IncomingTab() {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" className="border-green-600 text-green-700 hover:bg-green-50 gap-2"><Printer className="w-4 h-4" />طباعة + QR</Button>
-                <Button onClick={handleSave} className="bg-green-600 hover:bg-green-700 text-white gap-2">
-                  <Save className="w-4 h-4" />حفظ + <MessageCircle className="w-4 h-4" />
+                <Button onClick={handleSave} disabled={saving} className="bg-green-600 hover:bg-green-700 text-white gap-2">
+                  <Save className="w-4 h-4" />{saving ? "جاري الحفظ..." : "حفظ"} + <MessageCircle className="w-4 h-4" />
                 </Button>
               </div>
             </div>
@@ -688,83 +801,126 @@ function IncomingTab() {
    OUTGOING TAB
 ══════════════════════════════════════════════ */
 interface OutgoingRow {
-  id: number; item: string; pkg: string; requestedQty: string;
+  id: number;
+  itemId: string; item: string;
+  packageId: string; pkg: string;
+  requestedQty: string;
   availableQty: number; serial: string; damaged: string; chamber: string; naulage: string;
 }
-const MOCK_AVAILABLE: Record<string, number> = {
-  "دجاج مجمد": 150, "لحم بقري": 80, "أسماك": 45, "خضروات مبردة": 200, "فواكه مبردة": 120,
-};
+
+const emptyOutRow = (): OutgoingRow => ({
+  id: Date.now() + Math.floor(Math.random() * 1000),
+  itemId: "", item: "", packageId: "", pkg: "",
+  requestedQty: "", availableQty: 0, serial: "", damaged: "0", chamber: "", naulage: "",
+});
 
 function OutgoingTab() {
-  const { customers, items, packages, warehouses, customerItems, customerDrivers, customerContacts } = useDb();
+  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
+  const [items, setItems] = useState<BackendItem[]>([]);
+  const [packages, setPackages] = useState<BackendPackage[]>([]);
+  const [warehouses, setWarehouses] = useState<BackendWarehouse[]>([]);
 
-  const getNaulage = (customerId: string, itemName: string): number => {
-    if (!customerId) return 0;
-    const specific = customerItems.find(
-      ci => ci.customerId === Number(customerId) && ci.itemName === itemName,
-    );
-    if (specific) return specific.naulage;
-    const cust = customers.find(c => c.id === Number(customerId));
-    return cust?.defaultNaulage ?? 0;
-  };
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [c, i, p, w] = await Promise.all([
+          getAllCustomers(1, 200),
+          getAllItems(1, 200),
+          getAllPackages(1, 200),
+          getAllWarehouses(1, 100),
+        ]);
+        if (cancelled) return;
+        setCustomers(c.filter(x => x.isActive));
+        setItems(i.filter(x => x.isActive));
+        setPackages(p.filter(x => x.isActive));
+        setWarehouses(w.filter(x => x.isActive));
+      } catch (err: any) {
+        if (!cancelled) toast.error(err?.message ?? "فشل تحميل البيانات");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [selectedWarehouseId, setSelectedWarehouseId] = useState("");
   const [selectedWaPhone, setSelectedWaPhone] = useState("");
   const [selectedDriver, setSelectedDriver] = useState("");
+  const [vehiclePlate, setVehiclePlate] = useState("");
+  const [movementDate, setMovementDate] = useState(new Date().toISOString().split("T")[0]);
+  const [notes, setNotes] = useState("");
   const [temperature, setTemperature] = useState("");
   const [openingFee, setOpeningFee] = useState("");
-  const [rows, setRows] = useState<OutgoingRow[]>([
-    { id: 1, item: "", pkg: "", requestedQty: "", availableQty: 0, serial: "", damaged: "0", chamber: "", naulage: "" },
-  ]);
+  const [saving, setSaving] = useState(false);
+  const [rows, setRows] = useState<OutgoingRow[]>([emptyOutRow()]);
   const [showTips, setShowTips] = useState(false);
   const [tipsAmount, setTipsAmount] = useState("");
   const [tipsNote, setTipsNote] = useState("");
-  const invoiceNo = `OUT-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`;
+  const invoiceNo = useMemo(() => `OUT-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`, []);
 
-  const addRow = () => setRows(r => [...r, { id: Date.now(), item: "", pkg: "", requestedQty: "", availableQty: 0, serial: "", damaged: "0", chamber: "", naulage: "" }]);
+  const addRow = () => setRows(r => [...r, emptyOutRow()]);
   const removeRow = (id: number) => { if (rows.length > 1) setRows(r => r.filter(x => x.id !== id)); };
-  const updateRow = (id: number, field: keyof OutgoingRow, value: string | number) =>
-    setRows(r => r.map(x => {
-      if (x.id !== id) return x;
-      const updated = { ...x, [field]: value };
-      if (field === "item") {
-        updated.availableQty = MOCK_AVAILABLE[value as string] || 0;
-        if (selectedCustomerId) updated.naulage = String(getNaulage(selectedCustomerId, value as string));
-      }
-      return updated;
-    }));
+  const updateRow = (id: number, patch: Partial<OutgoingRow>) =>
+    setRows(r => r.map(x => x.id === id ? { ...x, ...patch } : x));
 
   const onCustomerChange = (val: string) => {
     setSelectedCustomerId(val);
-    setRows(r => r.map(x => ({ ...x, naulage: x.item ? String(getNaulage(val, x.item)) : x.naulage })));
-    const cust = customers.find(c => c.id === Number(val));
-    setSelectedWaPhone(cust?.phone || "");
+    const cust = customers.find(c => c.id === val);
+    setSelectedWaPhone(cust?.mobile || cust?.phone || "");
   };
 
-  const customerPhoneOptions = (() => {
+  const customerPhoneOptions = useMemo(() => {
     if (!selectedCustomerId) return [];
-    const cust = customers.find(c => c.id === Number(selectedCustomerId));
+    const cust = customers.find(c => c.id === selectedCustomerId);
     const opts: { label: string; phone: string }[] = [];
-    if (cust?.phone) opts.push({ label: `${cust.name} (رئيسي)`, phone: cust.phone });
-    customerContacts
-      .filter(c => c.customerId === Number(selectedCustomerId))
-      .forEach(c => opts.push({ label: `${c.name}${c.role ? ` — ${c.role}` : ""}`, phone: c.phone }));
-    customerDrivers
-      .filter(d => d.customerId === Number(selectedCustomerId))
-      .forEach(d => opts.push({ label: `${d.name} — سائق`, phone: d.phone }));
+    if (cust?.mobile) opts.push({ label: `${cust.arName || cust.name} (موبايل)`, phone: cust.mobile });
+    if (cust?.phone && cust.phone !== cust.mobile) opts.push({ label: `${cust.arName || cust.name} (هاتف)`, phone: cust.phone });
     return opts;
-  })();
+  }, [selectedCustomerId, customers]);
 
   const hasError = (row: OutgoingRow) => Number(row.requestedQty) > row.availableQty && row.availableQty > 0 && row.requestedQty !== "";
   const totalQty = rows.reduce((s, r) => s + (Number(r.requestedQty) || 0), 0);
   const totalNaulage = rows.reduce((s, r) => s + (Number(r.naulage) || 0) * (Number(r.requestedQty) || 0), 0);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (rows.some(hasError)) { toast.error("الكمية المطلوبة تتجاوز الكمية المتاحة"); return; }
-    const customerName = customers.find(c => c.id === Number(selectedCustomerId))?.name || "عميل";
-    const msg = `🔴 *منصرف جديد*\nرقم الفاتورة: ${invoiceNo}\nالعميل: ${customerName}\nالكمية: ${totalQty.toLocaleString()} طرد\nدرجة الحرارة: ${temperature || "—"} °م\nالنولون: ${totalNaulage.toLocaleString()} ج.م${openingFee ? `\nفتح عنبر: ${Number(openingFee).toLocaleString()} ج.م` : ""}\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
-    toast.success(`تم حفظ فاتورة الصرف ${invoiceNo} بنجاح`);
-    sendWhatsApp(msg, selectedWaPhone);
+    if (!selectedCustomerId) { toast.error("اختر العميل"); return; }
+    if (!selectedWarehouseId) { toast.error("اختر المخزن"); return; }
+    if (!selectedDriver) { toast.error("اختر السائق"); return; }
+    const validRows = rows.filter(r => r.itemId && Number(r.requestedQty) > 0);
+    if (validRows.length === 0) { toast.error("أضف صنف واحد على الأقل بكمية صحيحة"); return; }
+
+    setSaving(true);
+    try {
+      let savedCount = 0;
+      for (const r of validRows) {
+        const num = `${invoiceNo}-${++savedCount}`;
+        await addMovement({
+          movementNumber: num,
+          movementType: "Outgoing",
+          movementDate: new Date(movementDate).toISOString(),
+          customerId: selectedCustomerId,
+          itemId: r.itemId,
+          packageId: r.packageId || undefined,
+          fromWarehouseId: selectedWarehouseId,
+          quantity: Number(r.requestedQty),
+          unit: "طرد",
+          driverName: selectedDriver || undefined,
+          vehiclePlate: vehiclePlate || undefined,
+          referenceNumber: r.serial || undefined,
+          notes: notes || undefined,
+        });
+      }
+      const customerName = customers.find(c => c.id === selectedCustomerId)?.arName || customers.find(c => c.id === selectedCustomerId)?.name || "عميل";
+      const msg = `🔴 *منصرف جديد*\nرقم الفاتورة: ${invoiceNo}\nالعميل: ${customerName}\nالكمية: ${totalQty.toLocaleString()} طرد\nدرجة الحرارة: ${temperature || "—"} °م\nالنولون: ${totalNaulage.toLocaleString()} ج.م${openingFee ? `\nفتح عنبر: ${Number(openingFee).toLocaleString()} ج.م` : ""}\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
+      toast.success(`تم حفظ ${savedCount} حركة منصرف للفاتورة ${invoiceNo}`);
+      if (selectedWaPhone) sendWhatsApp(msg, selectedWaPhone);
+      setRows([emptyOutRow()]);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حفظ الحركات");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleTipsSave = () => {
@@ -784,9 +940,9 @@ function OutgoingTab() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <Label>العميل *</Label>
-                <Select onValueChange={onCustomerChange}>
+                <Select value={selectedCustomerId} onValueChange={onCustomerChange}>
                   <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
-                  <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+                  <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name}</SelectItem>)}</SelectContent>
                 </Select>
                 {selectedCustomerId && (
                   <div className="mt-1 space-y-0.5">
@@ -808,27 +964,21 @@ function OutgoingTab() {
               </div>
               <div className="space-y-1.5">
                 <Label>التاريخ *</Label>
-                <Input type="date" dir="rtl" defaultValue={new Date().toISOString().split("T")[0]} />
+                <Input type="date" dir="rtl" value={movementDate} onChange={e => setMovementDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>السائق *</Label>
-                <Select onValueChange={setSelectedDriver}>
-                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر السائق (إلزامي)" /></SelectTrigger>
-                  <SelectContent dir="rtl">
-                    <SelectItem value="يوسف عبدالرحمن">يوسف عبدالرحمن</SelectItem>
-                    <SelectItem value="طارق الحسين">طارق الحسين</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Input placeholder="اسم السائق (إلزامي)" dir="rtl" value={selectedDriver} onChange={e => setSelectedDriver(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>رقم السيارة</Label>
-                <Input placeholder="أ ب ج 1234" dir="rtl" />
+                <Input placeholder="أ ب ج 1234" dir="rtl" value={vehiclePlate} onChange={e => setVehiclePlate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>المخزن *</Label>
-                <Select>
+                <Select value={selectedWarehouseId} onValueChange={setSelectedWarehouseId}>
                   <SelectTrigger dir="rtl"><SelectValue placeholder="اختر المخزن" /></SelectTrigger>
-                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>)}</SelectContent>
+                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
@@ -837,7 +987,7 @@ function OutgoingTab() {
               </div>
               <div className="col-span-2 md:col-span-3 space-y-1.5">
                 <Label>ملاحظات</Label>
-                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} />
+                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} value={notes} onChange={e => setNotes(e.target.value)} />
               </div>
             </div>
           </CardContent>
@@ -867,20 +1017,26 @@ function OutgoingTab() {
                       <motion.tr key={row.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className={cn("border-b transition-colors", err ? "bg-red-50/50" : "hover:bg-gray-50/30")}>
                         <td className="px-3 py-2 text-gray-500 text-xs">{idx + 1}</td>
                         <td className="px-2 py-1.5">
-                          <Select onValueChange={v => updateRow(row.id, "item", v)}>
+                          <Select value={row.itemId} onValueChange={v => {
+                            const it = items.find(i => i.id === v);
+                            updateRow(row.id, { itemId: v, item: it?.arName || it?.name || "" });
+                          }}>
                             <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
-                            <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.name}>{i.name}</SelectItem>)}</SelectContent>
+                            <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.id}>{i.arName || i.name}</SelectItem>)}</SelectContent>
                           </Select>
                         </td>
                         <td className="px-2 py-1.5">
-                          <Select>
+                          <Select value={row.packageId} onValueChange={v => {
+                            const p = packages.find(x => x.id === v);
+                            updateRow(row.id, { packageId: v, pkg: p?.arName || p?.name || p?.packageType || "" });
+                          }}>
                             <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="العبوة" /></SelectTrigger>
-                            <SelectContent dir="rtl">{packages.map(p => <SelectItem key={p.id} value={p.type}>{p.type}</SelectItem>)}</SelectContent>
+                            <SelectContent dir="rtl">{packages.map(p => <SelectItem key={p.id} value={p.id}>{p.arName || p.name || p.packageType}</SelectItem>)}</SelectContent>
                           </Select>
                         </td>
                         <td className="px-2 py-1.5">
                           <div className="relative">
-                            <Input className={cn("h-8 text-xs w-24", err ? "border-red-500 bg-red-50" : "")} type="number" placeholder="0" dir="rtl" value={row.requestedQty} onChange={e => updateRow(row.id, "requestedQty", e.target.value)} />
+                            <Input className={cn("h-8 text-xs w-24", err ? "border-red-500 bg-red-50" : "")} type="number" placeholder="0" dir="rtl" value={row.requestedQty} onChange={e => updateRow(row.id, { requestedQty: e.target.value })} />
                             {err && <AlertCircle className="absolute left-1 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />}
                           </div>
                           {err && <p className="text-red-500 text-xs mt-0.5">يتجاوز المتاح!</p>}
@@ -890,12 +1046,12 @@ function OutgoingTab() {
                             {row.availableQty || "—"} طرد
                           </span>
                         </td>
-                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-28" placeholder="SN-XXXXX" dir="rtl" /></td>
-                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-20" type="number" defaultValue="0" dir="rtl" /></td>
-                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" placeholder="A-1" dir="rtl" /></td>
+                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-28" placeholder="SN-XXXXX" dir="rtl" value={row.serial} onChange={e => updateRow(row.id, { serial: e.target.value })} /></td>
+                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-20" type="number" placeholder="0" dir="rtl" value={row.damaged} onChange={e => updateRow(row.id, { damaged: e.target.value })} /></td>
+                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" placeholder="A-1" dir="rtl" value={row.chamber} onChange={e => updateRow(row.id, { chamber: e.target.value })} /></td>
                         <td className="px-2 py-1.5 bg-amber-50/50">
                           <div className="flex items-center gap-1">
-                            <Input className="h-8 text-xs w-20 border-amber-200 bg-amber-50" type="number" placeholder="0" dir="rtl" value={row.naulage} onChange={e => updateRow(row.id, "naulage", e.target.value)} />
+                            <Input className="h-8 text-xs w-20 border-amber-200 bg-amber-50" type="number" placeholder="0" dir="rtl" value={row.naulage} onChange={e => updateRow(row.id, { naulage: e.target.value })} />
                             {row.naulage && <span className="text-xs text-amber-600">=&nbsp;{((Number(row.naulage)||0)*(Number(row.requestedQty)||0)).toLocaleString()}</span>}
                           </div>
                         </td>
@@ -949,8 +1105,8 @@ function OutgoingTab() {
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" className="border-red-600 text-red-700 hover:bg-red-50 gap-2"><Printer className="w-4 h-4" />طباعة</Button>
-                <Button onClick={handleSave} className="bg-red-600 hover:bg-red-700 text-white gap-2">
-                  <Save className="w-4 h-4" />حفظ + <MessageCircle className="w-4 h-4" />
+                <Button onClick={handleSave} disabled={saving} className="bg-red-600 hover:bg-red-700 text-white gap-2">
+                  <Save className="w-4 h-4" />{saving ? "جاري الحفظ..." : "حفظ"} + <MessageCircle className="w-4 h-4" />
                 </Button>
               </div>
             </div>
@@ -992,16 +1148,95 @@ function OutgoingTab() {
    TRANSFERS TAB CONTENT
 ══════════════════════════════════════════════ */
 function TransfersTab() {
-  const { customers, items, warehouses } = useDb();
+  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
+  const [items, setItems] = useState<BackendItem[]>([]);
+  const [warehouses, setWarehouses] = useState<BackendWarehouse[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [c, i, w] = await Promise.all([
+          getAllCustomers(1, 200),
+          getAllItems(1, 200),
+          getAllWarehouses(1, 100),
+        ]);
+        if (cancelled) return;
+        setCustomers(c.filter(x => x.isActive));
+        setItems(i.filter(x => x.isActive));
+        setWarehouses(w.filter(x => x.isActive));
+      } catch (err: any) {
+        if (!cancelled) toast.error(err?.message ?? "فشل تحميل البيانات");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const [subTab, setSubTab] = useState("warehouses");
   const [temperature, setTemperature] = useState("");
-  const trf = `TRF-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`;
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = (type: string) => {
-    const label = type === "warehouses" ? "تحويل مخزن" : "تحويل عميل";
-    const msg = `🟡 *${label} جديد*\nرقم التحويل: ${trf}${temperature ? `\nدرجة الحرارة: ${temperature} °م` : ""}\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
-    toast.success(`تم تأكيد ${label} بنجاح`);
-    sendWhatsApp(msg);
+  // Warehouse-to-warehouse transfer state
+  const [whFromId, setWhFromId] = useState("");
+  const [whToId, setWhToId] = useState("");
+  const [whCustomerId, setWhCustomerId] = useState("");
+  const [whItemId, setWhItemId] = useState("");
+  const [whQty, setWhQty] = useState("");
+  const [whNotes, setWhNotes] = useState("");
+
+  // Customer-to-customer transfer state (no separate backend support — uses Transfer with same warehouse FK if needed)
+  const [cstFromId, setCstFromId] = useState("");
+  const [cstToId, setCstToId] = useState("");
+  const [cstItemId, setCstItemId] = useState("");
+  const [cstQty, setCstQty] = useState("");
+  const [cstNotes, setCstNotes] = useState("");
+
+  const trf = useMemo(() => `TRF-2024-${String(Math.floor(Math.random() * 900) + 100).padStart(3, "0")}`, []);
+
+  const handleSave = async (type: string) => {
+    setSaving(true);
+    try {
+      if (type === "warehouses") {
+        if (!whFromId || !whToId) { toast.error("اختر المخزن المصدر والوجهة"); return; }
+        if (!whCustomerId) { toast.error("اختر العميل"); return; }
+        if (!whItemId) { toast.error("اختر الصنف"); return; }
+        if (!whQty || Number(whQty) <= 0) { toast.error("أدخل كمية صحيحة"); return; }
+        await addMovement({
+          movementNumber: trf,
+          movementType: "Transfer",
+          movementDate: new Date().toISOString(),
+          customerId: whCustomerId,
+          itemId: whItemId,
+          fromWarehouseId: whFromId,
+          toWarehouseId: whToId,
+          quantity: Number(whQty),
+          unit: "طرد",
+          notes: whNotes || undefined,
+        });
+      } else {
+        if (!cstFromId || !cstToId) { toast.error("اختر العميل المحول والمستلم"); return; }
+        if (!cstItemId) { toast.error("اختر الصنف"); return; }
+        if (!cstQty || Number(cstQty) <= 0) { toast.error("أدخل كمية صحيحة"); return; }
+        await addMovement({
+          movementNumber: trf,
+          movementType: "Transfer",
+          movementDate: new Date().toISOString(),
+          customerId: cstFromId,
+          itemId: cstItemId,
+          quantity: Number(cstQty),
+          unit: "طرد",
+          notes: `تحويل من العميل ${customers.find(c => c.id === cstFromId)?.arName ?? ""} إلى ${customers.find(c => c.id === cstToId)?.arName ?? ""}${cstNotes ? ` — ${cstNotes}` : ""}`,
+        });
+      }
+      const label = type === "warehouses" ? "تحويل مخزن" : "تحويل عميل";
+      const msg = `🟡 *${label} جديد*\nرقم التحويل: ${trf}${temperature ? `\nدرجة الحرارة: ${temperature} °م` : ""}\nالتاريخ: ${new Date().toLocaleDateString("ar-EG")}`;
+      toast.success(`تم تأكيد ${label} برقم ${trf}`);
+      sendWhatsApp(msg);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حفظ التحويل");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1023,14 +1258,16 @@ function TransfersTab() {
                       <span className="w-6 h-6 rounded-full bg-orange-600 text-white text-xs flex items-center justify-center">من</span>المخزن المصدر
                     </p>
                     <div className="space-y-1.5"><Label className="text-xs">المخزن</Label>
-                      <Select><SelectTrigger dir="rtl"><SelectValue placeholder="اختر المخزن" /></SelectTrigger>
-                        <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>)}</SelectContent>
+                      <Select value={whFromId} onValueChange={setWhFromId}>
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="اختر المخزن" /></SelectTrigger>
+                        <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-1.5"><Label className="text-xs">العنبر</Label><Input placeholder="A-1" dir="rtl" /></div>
                     <div className="space-y-1.5"><Label className="text-xs">العميل</Label>
-                      <Select><SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
-                        <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+                      <Select value={whCustomerId} onValueChange={setWhCustomerId}>
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
+                        <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                   </div>
@@ -1039,8 +1276,9 @@ function TransfersTab() {
                       <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center">إلى</span>المخزن الوجهة
                     </p>
                     <div className="space-y-1.5"><Label className="text-xs">المخزن</Label>
-                      <Select><SelectTrigger dir="rtl"><SelectValue placeholder="اختر المخزن" /></SelectTrigger>
-                        <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>)}</SelectContent>
+                      <Select value={whToId} onValueChange={setWhToId}>
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="اختر المخزن" /></SelectTrigger>
+                        <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-1.5"><Label className="text-xs">العنبر المستهدف</Label><Input placeholder="B-2" dir="rtl" /></div>
@@ -1050,21 +1288,22 @@ function TransfersTab() {
                   <p className="font-semibold text-gray-700 text-sm mb-3">تفاصيل الصنف</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="space-y-1.5"><Label className="text-xs">الصنف</Label>
-                      <Select><SelectTrigger dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
-                        <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.name}>{i.name}</SelectItem>)}</SelectContent>
+                      <Select value={whItemId} onValueChange={setWhItemId}>
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
+                        <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.id}>{i.arName || i.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-1.5"><Label className="text-xs">الكمية</Label><Input type="number" placeholder="0" dir="rtl" /></div>
+                    <div className="space-y-1.5"><Label className="text-xs">الكمية</Label><Input type="number" placeholder="0" dir="rtl" value={whQty} onChange={e => setWhQty(e.target.value)} /></div>
                     <div className="space-y-1.5">
                       <Label className="text-xs flex items-center gap-1"><Thermometer className="w-3 h-3 text-blue-500" />درجة الحرارة (°م)</Label>
                       <Input type="number" placeholder="-18" dir="rtl" value={temperature} onChange={e => setTemperature(e.target.value)} className="border border-[#d1d5dc] bg-[#f9fafb]" />
                     </div>
-                    <div className="space-y-1.5"><Label className="text-xs">ملاحظات</Label><Input placeholder="ملاحظات..." dir="rtl" /></div>
+                    <div className="space-y-1.5"><Label className="text-xs">ملاحظات</Label><Input placeholder="ملاحظات..." dir="rtl" value={whNotes} onChange={e => setWhNotes(e.target.value)} /></div>
                   </div>
                 </div>
                 <div className="mt-4 flex justify-start">
-                  <Button onClick={() => handleSave("warehouses")} className="bg-orange-600 hover:bg-orange-700 text-white gap-2">
-                    <Save className="w-4 h-4" />تأكيد التحويل + <MessageCircle className="w-4 h-4" />
+                  <Button onClick={() => handleSave("warehouses")} disabled={saving} className="bg-orange-600 hover:bg-orange-700 text-white gap-2">
+                    <Save className="w-4 h-4" />{saving ? "جاري الحفظ..." : "تأكيد التحويل"} + <MessageCircle className="w-4 h-4" />
                   </Button>
                 </div>
               </CardContent>
@@ -1081,8 +1320,9 @@ function TransfersTab() {
                       <span className="w-6 h-6 rounded-full bg-orange-600 text-white text-xs flex items-center justify-center">من</span>العميل المحوِّل
                     </p>
                     <div className="space-y-1.5"><Label className="text-xs">العميل</Label>
-                      <Select><SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
-                        <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+                      <Select value={cstFromId} onValueChange={setCstFromId}>
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
+                        <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-1.5"><Label className="text-xs">المخزن والعنبر</Label><Input placeholder="ثلاجة A — عنبر 2" dir="rtl" /></div>
@@ -1092,8 +1332,9 @@ function TransfersTab() {
                       <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center">إلى</span>العميل المستلِم
                     </p>
                     <div className="space-y-1.5"><Label className="text-xs">العميل</Label>
-                      <Select><SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
-                        <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
+                      <Select value={cstToId} onValueChange={setCstToId}>
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
+                        <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-1.5"><Label className="text-xs">المخزن والعنبر</Label><Input placeholder="ثلاجة B — عنبر 1" dir="rtl" /></div>
@@ -1102,21 +1343,22 @@ function TransfersTab() {
                 <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="space-y-1.5"><Label className="text-xs">الصنف</Label>
-                      <Select><SelectTrigger dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
-                        <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.name}>{i.name}</SelectItem>)}</SelectContent>
+                      <Select value={cstItemId} onValueChange={setCstItemId}>
+                        <SelectTrigger dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
+                        <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.id}>{i.arName || i.name}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-1.5"><Label className="text-xs">الكمية</Label><Input type="number" placeholder="0" dir="rtl" /></div>
+                    <div className="space-y-1.5"><Label className="text-xs">الكمية</Label><Input type="number" placeholder="0" dir="rtl" value={cstQty} onChange={e => setCstQty(e.target.value)} /></div>
                     <div className="space-y-1.5">
                       <Label className="text-xs flex items-center gap-1"><Thermometer className="w-3 h-3 text-blue-500" />درجة الحرارة (°م)</Label>
                       <Input type="number" placeholder="-18" dir="rtl" value={temperature} onChange={e => setTemperature(e.target.value)} className="border border-[#d1d5dc] bg-[#f9fafb]" />
                     </div>
-                    <div className="space-y-1.5"><Label className="text-xs">ملاحظات</Label><Input placeholder="ملاحظات إضافية..." dir="rtl" /></div>
+                    <div className="space-y-1.5"><Label className="text-xs">ملاحظات</Label><Input placeholder="ملاحظات إضافية..." dir="rtl" value={cstNotes} onChange={e => setCstNotes(e.target.value)} /></div>
                   </div>
                 </div>
                 <div className="mt-4 flex justify-start">
-                  <Button onClick={() => handleSave("customers")} className="bg-orange-600 hover:bg-orange-700 text-white gap-2">
-                    <Save className="w-4 h-4" />تأكيد التحويل + <MessageCircle className="w-4 h-4" />
+                  <Button onClick={() => handleSave("customers")} disabled={saving} className="bg-orange-600 hover:bg-orange-700 text-white gap-2">
+                    <Save className="w-4 h-4" />{saving ? "جاري الحفظ..." : "تأكيد التحويل"} + <MessageCircle className="w-4 h-4" />
                   </Button>
                 </div>
               </CardContent>
