@@ -2,4 +2,13 @@
 
 body, html, * {
   font-family: 'Noto Kufi Arabic', sans-serif !important;
+  /* Activate Noto Kufi Arabic's localised Eastern Arabic-Indic digit glyphs (٠١٢٣٤٥٦٧٨٩) */
+  font-feature-settings: "locl" 1;
+}
+
+/* Inputs, tables, and mono spans that show numbers keep the same feature */
+input[type="number"],
+input[type="text"],
+td, th, span, p, div {
+  font-feature-settings: "locl" 1;
 }

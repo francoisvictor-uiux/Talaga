@@ -157,7 +157,7 @@ function printInvoice(m: BackendMovement, itemRows: BackendMovement[]) {
   const rowQr    = (id: string) =>
     `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(movementDeepLink(id))}`;
   const html = `<!doctype html>
-<html dir="rtl" lang="ar"><head><meta charset="utf-8"/><title>فاتورة ${m.movementNumber}</title>
+<html dir="rtl" lang="ar"><head><meta charset="utf-8"/><title>ايصال استلام ${baseInvoiceNo(m.movementNumber)}</title>
 <style>
   @page { size: A4; margin: 18mm; }
   body { font-family: "Noto Kufi Arabic", "Tahoma", sans-serif; color: #111; }
@@ -183,7 +183,7 @@ function printInvoice(m: BackendMovement, itemRows: BackendMovement[]) {
 </style></head><body>
   <div class="header">
     <div>
-      <div class="title">فاتورة حركة</div>
+      <div class="title">ايصال استلام</div>
       <div class="subtitle">رقم: ${m.movementNumber} — ${date}</div>
       <span class="badge ${m.movementType === "Incoming" ? "in" : m.movementType === "Outgoing" ? "out" : "tr"}" style="margin-top:6px">${typeLabel}</span>
     </div>
@@ -201,19 +201,24 @@ function printInvoice(m: BackendMovement, itemRows: BackendMovement[]) {
     <div class="field"><div class="lbl">رقم السيارة</div><div class="val">${escapeHtml(m.vehiclePlate ?? "—")}</div></div>
   </div>
   <table>
-    <thead><tr><th>#</th><th>البيان</th><th>العبوة</th><th>الكمية</th><th>الوحدة</th><th>الوزن (كجم)</th><th>رقم الرسالة</th><th>QR</th></tr></thead>
+    <thead><tr><th>#</th><th>البيان</th><th>الماركة</th><th>العبوة</th><th>الكمية</th><th>الوحدة</th><th>الوزن (كجم)</th><th>رقم الرسالة</th><th>النولون</th><th>QR</th></tr></thead>
     <tbody>
-      ${rows.map((r, i) => `
+      ${rows.map((r, i) => {
+        const rowNaulage = (r.naulagePerUnit ?? 0) * (r.quantity ?? 0);
+        return `
       <tr>
         <td>${i + 1}</td>
         <td>${escapeHtml(r.itemArName ?? r.itemName ?? "—")}</td>
+        <td>${r.brandName ? `<span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:9px;font-size:11px">${escapeHtml(r.brandName)}</span>` : "—"}</td>
         <td>${escapeHtml(r.packageName ?? "—")}</td>
         <td>${(r.quantity ?? 0).toLocaleString("ar-EG")}</td>
         <td>${escapeHtml(r.unit ?? "طرد")}</td>
         <td>${r.netWeightKg != null ? r.netWeightKg.toLocaleString("ar-EG") : "—"}</td>
         <td>${escapeHtml(r.referenceNumber ?? "—")}</td>
+        <td>${rowNaulage > 0 ? rowNaulage.toLocaleString("ar-EG") + " ج.م" : "—"}</td>
         <td style="text-align:center"><img src="${rowQr(r.id)}" alt="QR" style="width:60px;height:60px"/></td>
-      </tr>`).join("")}
+      </tr>`;
+      }).join("")}
     </tbody>
   </table>
   ${m.notes ? `<div class="field" style="margin-top:14px"><div class="lbl">ملاحظات</div><div class="val">${escapeHtml(m.notes)}</div></div>` : ""}
@@ -414,6 +419,14 @@ const TYPE_BACKEND_TO_FRONT: Record<string, MovementRecord["type"]> = {
   Transfer: "transfers",
 };
 
+/* Strip the trailing "-N" item-count suffix from INV/OUT invoice numbers.
+   e.g. "INV-1716234567890-2" → "INV-1716234567890"
+   TRF numbers (no suffix) are returned unchanged. */
+const baseInvoiceNo = (n: string): string => {
+  const m = n.match(/^(.+)-([1-9]\d?)$/);
+  return m ? m[1] : n;
+};
+
 const mapMovement = (m: BackendMovement): MovementRecord => {
   const type = (TYPE_BACKEND_TO_FRONT[m.movementType] ?? "incoming") as MovementRecord["type"];
   const warehouse =
@@ -428,7 +441,7 @@ const mapMovement = (m: BackendMovement): MovementRecord => {
     item: m.itemArName || m.itemName || "—",
     quantity: Number(m.quantity ?? 0),
     weight: m.netWeightKg ?? undefined,
-    naulage: ((m.naulagePerUnit ?? 0) * (m.quantity ?? 0)) + (m.openingFee ?? 0) + (m.preCoolingFee ?? 0),
+    naulage: (m.naulagePerUnit ?? 0) * (m.quantity ?? 0),
     warehouse,
     date: (m.movementDate ?? "").slice(0, 10),
     driver: m.driverName ?? undefined,
@@ -467,9 +480,9 @@ function IndexTab() {
   /* ── QR popup (scannable large QR for any movement row) ── */
   const [qrPopup, setQrPopup] = useState<BackendMovement | null>(null);
 
-  /* Find all backend rows that share an invoice number. */
+  /* Find all backend rows that share an invoice (by base number, ignoring -N suffix). */
   const siblingsOf = (m: BackendMovement) =>
-    rawMovements.filter(x => x.movementNumber === m.movementNumber);
+    rawMovements.filter(x => baseInvoiceNo(x.movementNumber) === baseInvoiceNo(m.movementNumber));
 
 
   const handleDeleteMovement = async (m: BackendMovement) => {
@@ -515,6 +528,36 @@ function IndexTab() {
   }, [movements, search, typeFilter, customerFilter, dateFrom, dateTo]);
 
   const uniqueCustomers = useMemo(() => [...new Set(movements.map(m => m.customer))], [movements]);
+
+  /* Group filtered rows by base invoice number — one table row per invoice */
+  const grouped = useMemo(() => {
+    const map = new Map<string, { records: MovementRecord[]; raws: BackendMovement[] }>();
+    filtered.forEach(m => {
+      const raw = rawMovements.find(r => r.id === m.id);
+      if (!raw) return;
+      const key = baseInvoiceNo(m.invoiceNo);
+      if (!map.has(key)) map.set(key, { records: [], raws: [] });
+      map.get(key)!.records.push(m);
+      map.get(key)!.raws.push(raw);
+    });
+    return [...map.values()].map(({ records, raws }) => {
+      const first = records[0];
+      return {
+        invoiceBase: baseInvoiceNo(first.invoiceNo),
+        type: first.type,
+        customer: first.customer,
+        itemNames: records.map(r => r.item),
+        totalQty: records.reduce((s, r) => s + r.quantity, 0),
+        totalWeight: records.reduce((s, r) => s + (r.weight ?? 0), 0),
+        totalNaulage: records.reduce((s, r) => s + r.naulage, 0),
+        warehouse: first.warehouse,
+        driver: first.driver,
+        date: first.date,
+        firstRaw: raws[0],
+        allRaws: raws,
+      };
+    });
+  }, [filtered, rawMovements]);
 
   const totalIncoming = filtered.filter(m => m.type === "incoming").reduce((s, m) => s + m.quantity, 0);
   const totalOutgoing = filtered.filter(m => m.type === "outgoing").reduce((s, m) => s + m.quantity, 0);
@@ -667,10 +710,10 @@ function IndexTab() {
         <Card className="border-0 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
             <h3 className="font-semibold text-gray-800">نتائج الحركات</h3>
-            <span className="text-xs text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">{filtered.length} حركة</span>
+            <span className="text-xs text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">{grouped.length} فاتورة</span>
           </div>
           <CardContent className="p-0">
-            {filtered.length === 0 ? (
+            {grouped.length === 0 ? (
               <div className="py-16 text-center text-gray-400">
                 <List className="w-10 h-10 mx-auto mb-3 opacity-30" />
                 <p className="text-sm">لا توجد حركات تطابق البحث</p>
@@ -680,15 +723,15 @@ function IndexTab() {
                 <table className="w-full text-sm min-w-[960px]">
                   <thead>
                     <tr className="bg-blue-50 border-b border-blue-100">
-                      {["#","النوع","رقم الفاتورة","العميل","الصنف","الكمية","النولون","الثلاجة","السائق","التاريخ","QR","إجراءات"].map((h, i) => (
+                      {["#","النوع","رقم الفاتورة","العميل","الأصناف","الكمية","النولون","الثلاجة","السائق","التاريخ","QR","إجراءات"].map((h, i) => (
                         <th key={i} className="text-right px-3 py-2.5 text-xs font-medium text-blue-800 whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((m, idx) => (
+                    {grouped.map((g, idx) => (
                       <motion.tr
-                        key={m.id}
+                        key={g.invoiceBase}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: idx * 0.03 }}
@@ -696,63 +739,71 @@ function IndexTab() {
                       >
                         <td className="px-3 py-3 text-gray-400 text-xs">{idx + 1}</td>
                         <td className="px-3 py-3">
-                          <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium", TYPE_COLORS[m.type])}>
-                            <span className={cn("w-1.5 h-1.5 rounded-full", TYPE_DOT[m.type])} />
-                            {TYPE_LABELS[m.type]}
+                          <span className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium", TYPE_COLORS[g.type])}>
+                            <span className={cn("w-1.5 h-1.5 rounded-full", TYPE_DOT[g.type])} />
+                            {TYPE_LABELS[g.type]}
                           </span>
                         </td>
-                        <td className="px-3 py-3 font-mono text-xs text-blue-600 whitespace-nowrap">{m.invoiceNo}</td>
-                        <td className="px-3 py-3 text-gray-700 text-xs">{m.customer}</td>
-                        <td className="px-3 py-3 text-gray-700 text-xs">{m.item}</td>
-                        <td className="px-3 py-3">
-                          <span className="font-semibold text-gray-800">{m.quantity.toLocaleString()}</span>
-                          <span className="text-xs text-gray-400 mr-1">طرد</span>
-                          {m.weight && <span className="text-xs text-gray-400 block">{m.weight.toLocaleString()} كجم</span>}
+                        <td className="px-3 py-3 font-mono text-xs text-blue-600 whitespace-nowrap">{g.invoiceBase}</td>
+                        <td className="px-3 py-3 text-gray-700 text-xs">{g.customer}</td>
+                        <td className="px-3 py-3 text-gray-700 text-xs">
+                          {g.itemNames.length === 1
+                            ? g.itemNames[0]
+                            : <span>
+                                {g.itemNames.slice(0, 2).join("، ")}
+                                {g.itemNames.length > 2 && <span className="text-gray-400 mr-1">+{g.itemNames.length - 2}</span>}
+                                <span className="mr-1.5 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">{g.itemNames.length} أصناف</span>
+                              </span>
+                          }
                         </td>
-                        <td className="px-3 py-3 text-amber-600 font-medium text-xs">{m.naulage ? m.naulage.toLocaleString() + " ج.م" : "—"}</td>
-                        <td className="px-3 py-3 text-gray-600 text-xs">{m.warehouse}</td>
-                        <td className="px-3 py-3 text-gray-500 text-xs">{m.driver || "—"}</td>
-                        <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{m.date}</td>
+                        <td className="px-3 py-3">
+                          <span className="font-semibold text-gray-800">{g.totalQty.toLocaleString()}</span>
+                          <span className="text-xs text-gray-400 mr-1">طرد</span>
+                          {g.totalWeight > 0 && <span className="text-xs text-gray-400 block">{g.totalWeight.toLocaleString()} كجم</span>}
+                        </td>
+                        <td className="px-3 py-3 text-amber-600 font-medium text-xs">{g.totalNaulage > 0 ? g.totalNaulage.toLocaleString() + " ج.م" : "—"}</td>
+                        <td className="px-3 py-3 text-gray-600 text-xs">{g.warehouse}</td>
+                        <td className="px-3 py-3 text-gray-500 text-xs">{g.driver || "—"}</td>
+                        <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{g.date}</td>
                         <td className="px-3 py-3 whitespace-nowrap">
                           <button
                             title="افتح الـQR للمسح"
-                            onClick={() => {
-                              const raw = rawMovements.find(r => r.id === m.id);
-                              if (raw) setQrPopup(raw);
-                            }}
+                            onClick={() => setQrPopup(g.firstRaw)}
                             className="inline-flex items-center justify-center bg-white border border-gray-200 rounded p-0.5 hover:border-blue-400 transition-colors"
                           >
-                            <QRCodeSVG value={movementDeepLink(m.id)} size={36} level="M" includeMargin={false} />
+                            <QRCodeSVG value={movementDeepLink(g.firstRaw.id)} size={36} level="M" includeMargin={false} />
                           </button>
                         </td>
                         <td className="px-3 py-3 whitespace-nowrap">
-                          {(() => {
-                            const raw = rawMovements.find(r => r.id === m.id);
-                            if (!raw) return null;
-                            return (
-                              <div className="flex items-center gap-0.5">
-                                <button title="عرض" onClick={() => navigate(`/movements/${raw.id}`)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600">
-                                  <Eye className="w-3.5 h-3.5" />
-                                </button>
-                                <button title="تعديل" onClick={() => navigate(`/movements/${raw.id}/edit`)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500">
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                                <button title="طباعة الفاتورة" onClick={() => printMovement(raw)} className="p-1.5 rounded hover:bg-indigo-50 text-indigo-600">
-                                  <Printer className="w-3.5 h-3.5" />
-                                </button>
-                                <button title="طباعة ملصق QR" onClick={() => printQrLabel(raw)} className="p-1.5 rounded hover:bg-green-50 text-green-600">
-                                  <Tag className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  title="حذف"
-                                  onClick={() => confirmDelete(raw.movementNumber, () => { void handleDeleteMovement(raw); }, { title: "حذف الحركة", description: `سيتم حذف الحركة ${raw.movementNumber} نهائياً.` })}
-                                  className="p-1.5 rounded hover:bg-red-50 text-red-500"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            );
-                          })()}
+                          <div className="flex items-center gap-0.5">
+                            <button title="عرض" onClick={() => navigate(`/movements/${g.firstRaw.id}`)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600">
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                            <button title="تعديل" onClick={() => navigate(`/movements/${g.firstRaw.id}/edit`)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button title="طباعة الفاتورة" onClick={() => printMovement(g.firstRaw)} className="p-1.5 rounded hover:bg-indigo-50 text-indigo-600">
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                            <button title="طباعة ملصق QR" onClick={() => printQrLabel(g.firstRaw)} className="p-1.5 rounded hover:bg-green-50 text-green-600">
+                              <Tag className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              title="حذف الفاتورة"
+                              onClick={() => confirmDelete(
+                                g.invoiceBase,
+                                async () => {
+                                  await Promise.all(g.allRaws.map(r => deactivateMovement(r.id)));
+                                  toast.success(`تم حذف الفاتورة ${g.invoiceBase}`);
+                                  await reload();
+                                },
+                                { title: "حذف الفاتورة", description: `سيتم حذف فاتورة ${g.invoiceBase} (${g.allRaws.length} صنف) نهائياً.` }
+                              )}
+                              className="p-1.5 rounded hover:bg-red-50 text-red-500"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </motion.tr>
                     ))}
@@ -858,6 +909,9 @@ function MovementViewScreen({
   const [qrPopupRow, setQrPopupRow] = useState<BackendMovement | null>(null);
   /* Main QR card collapse */
   const [qrCollapsed, setQrCollapsed] = useState(false);
+  /* WhatsApp dialog */
+  const [showWa, setShowWa]   = useState(false);
+  const [waPhone, setWaPhone] = useState("");
   const typeLabel = m.movementType === "Incoming" ? "وارد"
     : m.movementType === "Outgoing" ? "منصرف"
     : m.movementType === "Transfer" ? "تحويل" : m.movementType;
@@ -912,10 +966,13 @@ function MovementViewScreen({
                     تفاصيل الحركة
                     <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-full">{typeLabel}</span>
                   </h2>
-                  <p className="text-xs opacity-80 font-mono">{m.movementNumber}</p>
+                  <p className="text-xs opacity-80 font-mono">{baseInvoiceNo(m.movementNumber)}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <Button onClick={() => setShowWa(true)} className="bg-green-500 hover:bg-green-400 text-white gap-1.5">
+                  <MessageCircle className="w-4 h-4" />واتساب
+                </Button>
                 <Button onClick={onPrint} className="bg-white text-gray-700 hover:bg-gray-100 gap-1.5">
                   <Printer className="w-4 h-4" />طباعة
                 </Button>
@@ -939,7 +996,7 @@ function MovementViewScreen({
             <CardContent className="p-5 space-y-4">
               <h3 className="text-sm font-semibold text-gray-700 border-r-2 border-blue-500 pr-2">بيانات الفاتورة</h3>
               <div className="grid grid-cols-2 gap-3">
-                <DetailRow label="رقم الفاتورة" value={m.movementNumber} mono />
+                <DetailRow label="رقم الفاتورة" value={baseInvoiceNo(m.movementNumber)} mono />
                 <DetailRow label="التاريخ" value={new Date(m.movementDate).toLocaleDateString("ar-EG")} />
                 <DetailRow label="العميل" value={m.customerArName ?? m.customerName ?? "—"} />
                 <DetailRow label="عدد الأصناف" value={`${rows.length}`} />
@@ -963,30 +1020,64 @@ function MovementViewScreen({
 
           <Card className="border-0 shadow-sm">
             <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-800 text-sm">الأصناف ({rows.length})</h3>
+              <h3 className="font-semibold text-gray-800 text-sm">الأصناف والرسوم ({rows.length})</h3>
             </div>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[920px]">
+                <table className="w-full text-sm min-w-[1100px]">
                   <thead>
                     <tr className="bg-blue-50 border-b border-blue-100">
-                      {["#","الصنف","العبوة","الكمية","الوزن (كجم)","رقم الرسالة","مربع التبريد","QR"].map((h,i) => (
-                        <th key={i} className="text-right px-3 py-2.5 text-xs font-medium text-blue-800 whitespace-nowrap">{h}</th>
+                      {["#","الصنف","الماركة","العبوة","الكمية","الوزن (كجم)","مربع التبريد","رقم الرسالة","نولون/وحدة","إجمالي النولون","فتح عنبر","إعادة تبريد","إجمالي الرسوم","QR"].map((h,i) => (
+                        <th key={i} className={cn(
+                          "text-right px-3 py-2.5 text-xs font-medium whitespace-nowrap",
+                          i >= 8 && i <= 12 ? "text-amber-800 bg-amber-50" : "text-blue-800",
+                        )}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((r, idx) => {
                       const chamberLabel = r.toChamberName || r.fromChamberName || "—";
+                      const rowNaulage   = (r.naulagePerUnit ?? 0) * (r.quantity ?? 0);
+                      const rowOpening   = r.openingFee ?? 0;
+                      const rowPreCool   = r.preCoolingFee ?? 0;
+                      const rowTotal     = rowNaulage + rowOpening + rowPreCool;
                       return (
                         <tr key={r.id} className="border-b hover:bg-gray-50/30">
                           <td className="px-3 py-2.5 text-gray-500 text-xs">{idx + 1}</td>
-                          <td className="px-3 py-2.5 text-gray-800">{r.itemArName ?? r.itemName ?? "—"}</td>
+                          <td className="px-3 py-2.5 text-gray-800 font-medium">{r.itemArName ?? r.itemName ?? "—"}</td>
+                          <td className="px-3 py-2.5 text-xs">
+                            {r.brandName
+                              ? <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-[11px] font-medium">{r.brandName}</span>
+                              : <span className="text-gray-400">—</span>}
+                          </td>
                           <td className="px-3 py-2.5 text-gray-700 text-xs">{r.packageName ?? "—"}</td>
-                          <td className="px-3 py-2.5 font-semibold text-gray-800">{(r.quantity ?? 0).toLocaleString("ar-EG")} <span className="text-xs text-gray-400">{r.unit ?? ""}</span></td>
+                          <td className="px-3 py-2.5 font-semibold text-gray-800">
+                            {(r.quantity ?? 0).toLocaleString("ar-EG")}
+                            <span className="text-xs text-gray-400 mr-1">{r.unit ?? "طرد"}</span>
+                          </td>
                           <td className="px-3 py-2.5 text-gray-700 text-xs">{r.netWeightKg != null ? r.netWeightKg.toLocaleString("ar-EG") : "—"}</td>
-                          <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{r.referenceNumber ?? "—"}</td>
                           <td className="px-3 py-2.5 text-gray-700 text-xs">{chamberLabel}</td>
+                          <td className="px-3 py-2.5 font-mono text-xs text-gray-600">{r.referenceNumber ?? "—"}</td>
+                          {/* Fees columns */}
+                          <td className="px-3 py-2.5 text-xs text-amber-700 bg-amber-50/40">
+                            {r.naulagePerUnit ? `${r.naulagePerUnit.toLocaleString("ar-EG")} / ${r.naulageUnit ?? "طرد"}` : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs font-semibold text-amber-700 bg-amber-50/40">
+                            {rowNaulage > 0 ? `${rowNaulage.toLocaleString("ar-EG")} ج.م` : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-orange-600 bg-orange-50/30">
+                            {rowOpening > 0 ? `${rowOpening.toLocaleString("ar-EG")} ج.م` : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 text-xs text-blue-600 bg-blue-50/30">
+                            {rowPreCool > 0 ? `${rowPreCool.toLocaleString("ar-EG")} ج.م` : "—"}
+                          </td>
+                          <td className="px-3 py-2.5 bg-gray-50">
+                            {rowTotal > 0
+                              ? <span className="font-bold text-gray-900">{rowTotal.toLocaleString("ar-EG")} <span className="text-xs font-normal text-gray-500">ج.م</span></span>
+                              : <span className="text-xs text-gray-400">—</span>
+                            }
+                          </td>
                           <td className="px-3 py-2.5">
                             <button
                               type="button"
@@ -1001,10 +1092,70 @@ function MovementViewScreen({
                       );
                     })}
                   </tbody>
+                  {/* Totals footer */}
+                  {rows.length > 0 && (() => {
+                    const totNaulage  = rows.reduce((s, r) => s + (r.naulagePerUnit ?? 0) * (r.quantity ?? 0), 0);
+                    const totOpening  = rows.reduce((s, r) => s + (r.openingFee ?? 0), 0);
+                    const totPreCool  = rows.reduce((s, r) => s + (r.preCoolingFee ?? 0), 0);
+                    const totQty      = rows.reduce((s, r) => s + (r.quantity ?? 0), 0);
+                    const totWeight   = rows.reduce((s, r) => s + (r.netWeightKg ?? 0), 0);
+                    const grand       = totNaulage + totOpening + totPreCool;
+                    return (
+                      <tfoot>
+                        <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold text-xs">
+                          <td colSpan={4} className="px-3 py-2.5 text-gray-600">الإجمالي</td>
+                          <td className="px-3 py-2.5 text-gray-800">{totQty.toLocaleString("ar-EG")} طرد</td>
+                          <td className="px-3 py-2.5 text-gray-700">{totWeight > 0 ? `${totWeight.toLocaleString("ar-EG")} كجم` : "—"}</td>
+                          <td colSpan={2} />
+                          <td className="px-3 py-2.5 bg-amber-50" />
+                          <td className="px-3 py-2.5 text-amber-700 bg-amber-50">{totNaulage > 0 ? `${totNaulage.toLocaleString("ar-EG")} ج.م` : "—"}</td>
+                          <td className="px-3 py-2.5 text-orange-600 bg-orange-50/30">{totOpening > 0 ? `${totOpening.toLocaleString("ar-EG")} ج.م` : "—"}</td>
+                          <td className="px-3 py-2.5 text-blue-600 bg-blue-50/30">{totPreCool > 0 ? `${totPreCool.toLocaleString("ar-EG")} ج.م` : "—"}</td>
+                          <td className="px-3 py-2.5 bg-gray-50">
+                            {grand > 0 ? <span className="text-base font-bold text-gray-900">{grand.toLocaleString("ar-EG")} ج.م</span> : "—"}
+                          </td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    );
+                  })()}
                 </table>
               </div>
             </CardContent>
           </Card>
+
+          {/* Fees summary cards */}
+          {(() => {
+            const totNaulage = rows.reduce((s, r) => s + (r.naulagePerUnit ?? 0) * (r.quantity ?? 0), 0);
+            const totOpening = rows.reduce((s, r) => s + (r.openingFee ?? 0), 0);
+            const totPreCool = rows.reduce((s, r) => s + (r.preCoolingFee ?? 0), 0);
+            const grand      = totNaulage + totOpening + totPreCool;
+            if (grand === 0) return null;
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-xl p-3 bg-amber-50 border border-amber-200 text-center">
+                  <p className="text-xs text-gray-500 mb-1">إجمالي النولون</p>
+                  <p className="text-lg font-bold text-amber-700">{totNaulage.toLocaleString("ar-EG")} <span className="text-xs font-normal">ج.م</span></p>
+                </div>
+                {totOpening > 0 && (
+                  <div className="rounded-xl p-3 bg-orange-50 border border-orange-200 text-center">
+                    <p className="text-xs text-gray-500 mb-1">فتح عنبر</p>
+                    <p className="text-lg font-bold text-orange-600">{totOpening.toLocaleString("ar-EG")} <span className="text-xs font-normal">ج.م</span></p>
+                  </div>
+                )}
+                {totPreCool > 0 && (
+                  <div className="rounded-xl p-3 bg-blue-50 border border-blue-200 text-center">
+                    <p className="text-xs text-gray-500 mb-1">إعادة تبريد</p>
+                    <p className="text-lg font-bold text-blue-600">{totPreCool.toLocaleString("ar-EG")} <span className="text-xs font-normal">ج.م</span></p>
+                  </div>
+                )}
+                <div className="rounded-xl p-3 bg-gray-800 border border-gray-700 text-center">
+                  <p className="text-xs text-gray-300 mb-1">إجمالي الرسوم</p>
+                  <p className="text-xl font-bold text-white">{grand.toLocaleString("ar-EG")} <span className="text-xs font-normal">ج.م</span></p>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Right: QR card (collapsible) */}
@@ -1058,6 +1209,78 @@ function MovementViewScreen({
       </motion.div>
 
       <QrPopupDialog movement={qrPopupRow} onClose={() => setQrPopupRow(null)} />
+
+      {/* ── WhatsApp Dialog ── */}
+      {showWa && (() => {
+        const date    = (m.movementDate ?? "").slice(0, 10);
+        const customer = m.customerArName || m.customerName || "—";
+        const warehouse = m.movementType === "Outgoing"
+          ? (m.fromWarehouseName ?? "—")
+          : (m.toWarehouseName || m.fromWarehouseName || "—");
+        const totalNaulage = rows.reduce((s, r) => s + (r.naulagePerUnit ?? 0) * (r.quantity ?? 0), 0);
+        const totalOpening = rows.reduce((s, r) => s + (r.openingFee ?? 0), 0);
+        const totalPreCool = rows.reduce((s, r) => s + (r.preCoolingFee ?? 0), 0);
+        const grand        = totalNaulage + totalOpening + totalPreCool;
+        const itemLines    = rows.map((r, i) =>
+          `  ${i + 1}. ${r.itemArName || r.itemName || "—"} — ${(r.quantity ?? 0).toLocaleString()} ${r.unit || "طرد"}${r.netWeightKg ? ` / ${r.netWeightKg.toLocaleString()} كجم` : ""}`
+        ).join("\n");
+        const msg = `${typeLabel === "وارد" ? "🟢" : typeLabel === "منصرف" ? "🔴" : "🟡"} *${typeLabel} — ${m.movementNumber}*
+العميل: ${customer}
+التاريخ: ${date}
+الثلاجة: ${warehouse}${m.driverName ? `\nالسائق: ${m.driverName}${m.vehiclePlate ? ` / ${m.vehiclePlate}` : ""}` : ""}
+الأصناف:
+${itemLines}
+إجمالي الكمية: ${totalQty.toLocaleString()} طرد${totalWeight > 0 ? ` / ${totalWeight.toLocaleString()} كجم` : ""}${grand > 0 ? `\nإجمالي الرسوم: ${grand.toLocaleString()} ج.م` : ""}`;
+
+        return (
+          <Dialog open onOpenChange={o => { if (!o) setShowWa(false); }}>
+            <DialogContent dir="rtl" className="max-w-lg bg-white">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <MessageCircle className="w-5 h-5 text-green-600" />
+                  إرسال عبر واتساب
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                {/* Message preview */}
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">الرسالة</label>
+                  <pre className="bg-green-50 border border-green-200 rounded-xl p-3 text-xs text-gray-800 whitespace-pre-wrap leading-relaxed font-sans max-h-60 overflow-y-auto">{msg}</pre>
+                </div>
+                {/* Phone input */}
+                <div>
+                  <label className="text-xs text-gray-500 mb-1 block">رقم الهاتف (اختياري)</label>
+                  <input
+                    type="tel"
+                    dir="ltr"
+                    value={waPhone}
+                    onChange={e => setWaPhone(e.target.value)}
+                    placeholder="01XXXXXXXXX أو اتركه فارغاً لاختيار المستلم في واتساب"
+                    className="w-full h-9 rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-400/30 focus:border-green-400"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">إذا تركت الرقم فارغاً ستفتح واتساب لتختار المستلم يدوياً</p>
+                </div>
+              </div>
+              <DialogFooter className="gap-2">
+                <Button
+                  onClick={() => {
+                    if (waPhone.trim()) {
+                      sendWhatsApp(msg, waPhone.trim());
+                    } else {
+                      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+                    }
+                    setShowWa(false);
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
+                >
+                  <MessageCircle className="w-4 h-4" />فتح واتساب
+                </Button>
+                <Button variant="outline" onClick={() => setShowWa(false)}>إلغاء</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
     </div>
   );
 }
@@ -3373,8 +3596,8 @@ export function MovementDetailPage() {
     getMovement(id)
       .then(async m => {
         setMovement(m);
-        const all = await getAllMovements({ pageSize: 100 });
-        setSiblings(all.filter(x => x.movementNumber === m.movementNumber && x.isActive));
+        const all = await getAllMovements({ pageSize: 500 });
+        setSiblings(all.filter(x => baseInvoiceNo(x.movementNumber) === baseInvoiceNo(m.movementNumber) && x.isActive));
       })
       .catch(() => toast.error("فشل تحميل الحركة"))
       .finally(() => setLoading(false));
@@ -3447,8 +3670,8 @@ export function MovementEditPage() {
     getMovement(id)
       .then(async m => {
         setMovement(m);
-        const all = await getAllMovements({ pageSize: 100 });
-        setSiblings(all.filter(x => x.movementNumber === m.movementNumber && x.isActive));
+        const all = await getAllMovements({ pageSize: 500 });
+        setSiblings(all.filter(x => baseInvoiceNo(x.movementNumber) === baseInvoiceNo(m.movementNumber) && x.isActive));
       })
       .catch(() => toast.error("فشل تحميل الحركة للتعديل"))
       .finally(() => setLoading(false));
