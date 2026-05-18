@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
   Plus, Eye, EyeOff, Edit, Shield, List, LayoutGrid, Search, X,
   Phone, Mail, DollarSign, CheckCircle2, XCircle, Clock,
-  AlertCircle, Banknote, Calendar, TrendingUp, Users
+  AlertCircle, Banknote, Calendar, TrendingUp, Users, CreditCard
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -19,18 +19,19 @@ import { Pagination, usePagination } from "../components/ui/Pagination";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
 import { getAllEmployees, addEmployeeRequest, editEmployeeRequest, type BackendEmployee } from "../services/employeeService";
-import { getJobTitlesDDL, type JobTitleOption } from "../services/jobTitleService";
+import { getJobTitlesDDL, addJobTitle as apiAddJobTitle, type JobTitleOption } from "../services/jobTitleService";
 import {
   getSalaries, addSalary, markSalaryPaid, addSalaryBonus, type BackendSalary,
   getLeaves, addLeave, setLeaveStatus, type BackendLeave,
   getAdvances, addAdvance, type BackendAdvance,
   getAbsences, addAbsence, type BackendAbsence,
 } from "../services/hrService";
+import { validatePhoneOptional, normalizePhone, PHONE_PLACEHOLDER } from "../utils/phone";
 
 const ROLE_OPTIONS = [
   { code: "Admin",      label: "مدير النظام" },
   { code: "Manager",    label: "مدير" },
-  { code: "Warehouse",  label: "عامل مخزن" },
+  { code: "Warehouse",  label: "عامل ثلاجة" },
   { code: "Accountant", label: "محاسب" },
   { code: "Viewer",     label: "مشاهدة فقط" },
 ];
@@ -41,11 +42,11 @@ const roleColors: Record<string, string> = {
   "مدير النظام": "bg-red-100 text-red-700 border-red-200",
   "مدير": "bg-purple-100 text-purple-700 border-purple-200",
   "محاسب": "bg-blue-100 text-blue-700 border-blue-200",
-  "عامل مخزن": "bg-green-100 text-green-700 border-green-200",
+  "عامل ثلاجة": "bg-green-100 text-green-700 border-green-200",
   "مشاهدة فقط": "bg-gray-100 text-gray-700 border-gray-200",
 };
 
-const permModules = ["المخازن", "الأصناف", "العملاء", "الوارد", "المنصرف", "التحويلات", "الجرد", "السندات", "التقارير", "الإعدادات"];
+const permModules = ["الثلاجات", "الأصناف", "العملاء", "الوارد", "المنصرف", "التحويلات", "الجرد", "السندات", "التقارير", "الإعدادات"];
 const permActions = ["عرض", "إضافة", "تعديل", "حذف"];
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.07 } } };
@@ -751,11 +752,11 @@ export function Employees() {
   const [selected, setSelected] = useState<EmployeeRow | null>(null);
   const [viewTarget, setViewTarget] = useState<EmployeeRow | null>(null);
   const [editTarget, setEditTarget] = useState<EmployeeRow | null>(null);
-  const [editForm, setEditForm] = useState({ fullName: "", arName: "", jobTitleId: "", phone: "", email: "", salary: "" });
+  const [editForm, setEditForm] = useState({ fullName: "", arName: "", nationalId: "", jobTitleId: "", phone: "", email: "", salary: "" });
   const [search, setSearch] = useState("");
 
   const emptyAddForm = {
-    fullName: "", arName: "", userName: "", email: "", phone: "",
+    fullName: "", arName: "", nationalId: "", userName: "", email: "", phone: "",
     role: "Warehouse", jobTitleId: "", status: "active", salary: "",
     password: "", confirmPassword: "", isUser: false,
   };
@@ -763,6 +764,28 @@ export function Employees() {
   const [showPwd, setShowPwd] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
+
+  /* ── Inline job-title creation (shared by Add & Edit dialogs) ── */
+  const [showNewJobTitle, setShowNewJobTitle]   = useState(false);
+  const [newJobTitleName, setNewJobTitleName]   = useState("");
+  const [savingJobTitle, setSavingJobTitle]     = useState(false);
+
+  const handleAddJobTitle = async (onSelect: (id: string) => void) => {
+    if (!newJobTitleName.trim()) { toast.error("أدخل اسم المسمى الوظيفي"); return; }
+    setSavingJobTitle(true);
+    try {
+      const added = await apiAddJobTitle(newJobTitleName.trim());
+      setJobTitles(prev => [...prev, added]);
+      onSelect(added.id);
+      setNewJobTitleName("");
+      setShowNewJobTitle(false);
+      toast.success(`تم إضافة المسمى "${added.arName || added.name}"`);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل إضافة المسمى");
+    } finally {
+      setSavingJobTitle(false);
+    }
+  };
 
   const loadEmployees = useCallback(async () => {
     setLoadingList(true);
@@ -794,6 +817,10 @@ export function Employees() {
       toast.error("يرجى تعبئة الحقول الإلزامية");
       return;
     }
+    {
+      const phoneErr = validatePhoneOptional(addForm.phone);
+      if (phoneErr) { toast.error(phoneErr); return; }
+    }
     if (addForm.isUser) {
       if (!addForm.userName || !addForm.email || !addForm.password) {
         toast.error("يرجى تعبئة بيانات تسجيل الدخول");
@@ -810,7 +837,8 @@ export function Employees() {
         code: `EMP-${Date.now()}`,
         fullName: addForm.fullName,
         arName: addForm.arName || undefined,
-        phone: addForm.phone || undefined,
+        nationalId: addForm.nationalId || undefined,
+        phone: addForm.phone ? normalizePhone(addForm.phone) : undefined,
         email: addForm.email || undefined,
         jobTitleId: addForm.jobTitleId,
         baseSalary: addForm.salary ? Number(addForm.salary) : undefined,
@@ -843,6 +871,7 @@ export function Employees() {
     setEditForm({
       fullName: emp.raw.fullName ?? "",
       arName: emp.raw.arName ?? "",
+      nationalId: emp.raw.nationalId ?? "",
       jobTitleId: emp.jobTitleId ?? "",
       phone: emp.phone,
       email: emp.email,
@@ -854,6 +883,10 @@ export function Employees() {
   const handleSaveEdit = async () => {
     if (!editTarget) return;
     if (!editForm.fullName || !editForm.jobTitleId) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
+    {
+      const phoneErr = validatePhoneOptional(editForm.phone);
+      if (phoneErr) { toast.error(phoneErr); return; }
+    }
     setEditLoading(true);
     try {
       const r = editTarget.raw;
@@ -862,8 +895,8 @@ export function Employees() {
         code: r.code,
         fullName: editForm.fullName,
         arName: editForm.arName || null,
-        nationalId: r.nationalId ?? null,
-        phone: editForm.phone || null,
+        nationalId: editForm.nationalId || null,
+        phone: editForm.phone ? normalizePhone(editForm.phone) : null,
         email: editForm.email || null,
         address: r.address ?? null,
         jobTitleId: editForm.jobTitleId,
@@ -1075,13 +1108,14 @@ export function Employees() {
               </div>
               <div className="p-5 space-y-3">
                 {[
-                  { label: "رقم الهاتف", value: viewTarget.phone || "—", icon: Phone },
-                  { label: "البريد الإلكتروني", value: viewTarget.email || "—", icon: Mail },
-                  { label: "الراتب", value: `${viewTarget.salary.toLocaleString()} ج.م`, icon: DollarSign },
+                  { label: "الرقم القومي", value: viewTarget.raw.nationalId || "—", icon: CreditCard, mono: true },
+                  { label: "رقم الهاتف", value: viewTarget.phone || "—", icon: Phone, mono: false },
+                  { label: "البريد الإلكتروني", value: viewTarget.email || "—", icon: Mail, mono: false },
+                  { label: "الراتب", value: `${viewTarget.salary.toLocaleString()} ج.م`, icon: DollarSign, mono: false },
                 ].map(row => (
                   <div key={row.label} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
                     <span className="text-xs text-gray-400 flex items-center gap-1.5"><row.icon className="w-3.5 h-3.5 text-gray-400" />{row.label}</span>
-                    <span className="text-sm font-semibold text-gray-800">{row.value}</span>
+                    <span className={cn("text-sm font-semibold text-gray-800", row.mono && row.value !== "—" && "font-mono tracking-widest")}>{row.value}</span>
                   </div>
                 ))}
               </div>
@@ -1158,8 +1192,34 @@ export function Employees() {
               />
             </div>
 
+            <div className="col-span-2 space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <span className="w-4 h-4 rounded bg-blue-100 text-blue-700 text-[10px] font-bold flex items-center justify-center">ID</span>
+                الرقم القومي
+              </Label>
+              <Input
+                dir="ltr" inputMode="numeric" maxLength={14} placeholder="00000000000000"
+                className="border border-[#d1d5dc] bg-[#f9fafb] font-mono tracking-widest"
+                value={addForm.nationalId}
+                onChange={e => setAddForm({ ...addForm, nationalId: e.target.value.replace(/\D/g, "").slice(0, 14) })}
+              />
+              {addForm.nationalId && addForm.nationalId.length !== 14 && (
+                <p className="text-[11px] text-amber-500">الرقم القومي يجب أن يكون 14 رقماً</p>
+              )}
+            </div>
+
             <div className="space-y-1.5">
-              <Label>المسمى الوظيفي <span className="text-red-500">*</span></Label>
+              <div className="flex items-center justify-between">
+                <Label>المسمى الوظيفي <span className="text-red-500">*</span></Label>
+                <button
+                  type="button"
+                  onClick={() => { setShowNewJobTitle(v => !v); setNewJobTitleName(""); }}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-1.5 py-0.5 rounded transition-colors"
+                  title="إضافة مسمى جديد"
+                >
+                  <Plus className="w-3 h-3" />إضافة
+                </button>
+              </div>
               <Select value={addForm.jobTitleId} onValueChange={v => setAddForm({ ...addForm, jobTitleId: v })}>
                 <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر المسمى" /></SelectTrigger>
                 <SelectContent dir="rtl">
@@ -1168,6 +1228,28 @@ export function Employees() {
                   ))}
                 </SelectContent>
               </Select>
+              {showNewJobTitle && (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <Input
+                    dir="rtl" placeholder="اسم المسمى الوظيفي..." autoFocus
+                    className="h-8 text-sm border border-blue-300 bg-blue-50/40 flex-1"
+                    value={newJobTitleName}
+                    onChange={e => setNewJobTitleName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") handleAddJobTitle(id => setAddForm(f => ({ ...f, jobTitleId: id }))); if (e.key === "Escape") setShowNewJobTitle(false); }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddJobTitle(id => setAddForm(f => ({ ...f, jobTitleId: id })))}
+                    disabled={savingJobTitle}
+                    className="h-8 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs disabled:opacity-50 flex-shrink-0"
+                  >
+                    {savingJobTitle ? "..." : "حفظ"}
+                  </button>
+                  <button type="button" onClick={() => setShowNewJobTitle(false)} className="h-8 w-8 flex items-center justify-center text-gray-400 hover:bg-gray-100 rounded-md flex-shrink-0">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -1184,11 +1266,15 @@ export function Employees() {
             <div className="space-y-1.5">
               <Label>رقم الهاتف</Label>
               <Input
-                dir="rtl" placeholder="01XXXXXXXXX"
-                className="border border-[#d1d5dc] bg-[#f9fafb]"
+                dir="ltr" inputMode="tel" placeholder={PHONE_PLACEHOLDER}
+                className={cn("border bg-[#f9fafb]",
+                  validatePhoneOptional(addForm.phone) ? "border-red-400 focus-visible:ring-red-300" : "border-[#d1d5dc]")}
                 value={addForm.phone}
                 onChange={e => setAddForm({ ...addForm, phone: e.target.value })}
               />
+              {validatePhoneOptional(addForm.phone) && (
+                <p className="text-[11px] text-red-500">{validatePhoneOptional(addForm.phone)}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -1305,8 +1391,33 @@ export function Employees() {
               <Label>الاسم بالعربية</Label>
               <Input dir="rtl" placeholder="اسم الموظف بالعربية" className="border border-[#d1d5dc] bg-[#f9fafb]" value={editForm.arName} onChange={e => setEditForm({ ...editForm, arName: e.target.value })} />
             </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <span className="w-4 h-4 rounded bg-blue-100 text-blue-700 text-[10px] font-bold flex items-center justify-center">ID</span>
+                الرقم القومي
+              </Label>
+              <Input
+                dir="ltr" inputMode="numeric" maxLength={14} placeholder="00000000000000"
+                className="border border-[#d1d5dc] bg-[#f9fafb] font-mono tracking-widest"
+                value={editForm.nationalId}
+                onChange={e => setEditForm({ ...editForm, nationalId: e.target.value.replace(/\D/g, "").slice(0, 14) })}
+              />
+              {editForm.nationalId && editForm.nationalId.length !== 14 && (
+                <p className="text-[11px] text-amber-500">الرقم القومي يجب أن يكون 14 رقماً</p>
+              )}
+            </div>
             <div className="space-y-1.5">
-              <Label>المسمى الوظيفي <span className="text-red-500">*</span></Label>
+              <div className="flex items-center justify-between">
+                <Label>المسمى الوظيفي <span className="text-red-500">*</span></Label>
+                <button
+                  type="button"
+                  onClick={() => { setShowNewJobTitle(v => !v); setNewJobTitleName(""); }}
+                  className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-1.5 py-0.5 rounded transition-colors"
+                  title="إضافة مسمى جديد"
+                >
+                  <Plus className="w-3 h-3" />إضافة
+                </button>
+              </div>
               <Select value={editForm.jobTitleId} onValueChange={v => setEditForm({ ...editForm, jobTitleId: v })}>
                 <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر المسمى" /></SelectTrigger>
                 <SelectContent dir="rtl">
@@ -1315,10 +1426,39 @@ export function Employees() {
                   ))}
                 </SelectContent>
               </Select>
+              {showNewJobTitle && (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <Input
+                    dir="rtl" placeholder="اسم المسمى الوظيفي..." autoFocus
+                    className="h-8 text-sm border border-blue-300 bg-blue-50/40 flex-1"
+                    value={newJobTitleName}
+                    onChange={e => setNewJobTitleName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") handleAddJobTitle(id => setEditForm(f => ({ ...f, jobTitleId: id }))); if (e.key === "Escape") setShowNewJobTitle(false); }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddJobTitle(id => setEditForm(f => ({ ...f, jobTitleId: id })))}
+                    disabled={savingJobTitle}
+                    className="h-8 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs disabled:opacity-50 flex-shrink-0"
+                  >
+                    {savingJobTitle ? "..." : "حفظ"}
+                  </button>
+                  <button type="button" onClick={() => setShowNewJobTitle(false)} className="h-8 w-8 flex items-center justify-center text-gray-400 hover:bg-gray-100 rounded-md flex-shrink-0">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>رقم الهاتف</Label>
-              <Input dir="rtl" placeholder="01XXXXXXXXX" className="border border-[#d1d5dc] bg-[#f9fafb]" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
+              <Input dir="ltr" inputMode="tel" placeholder={PHONE_PLACEHOLDER}
+                className={cn("border bg-[#f9fafb]",
+                  validatePhoneOptional(editForm.phone) ? "border-red-400 focus-visible:ring-red-300" : "border-[#d1d5dc]")}
+                value={editForm.phone}
+                onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
+              {validatePhoneOptional(editForm.phone) && (
+                <p className="text-[11px] text-red-500">{validatePhoneOptional(editForm.phone)}</p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label>البريد الإلكتروني</Label>

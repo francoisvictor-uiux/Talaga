@@ -40,6 +40,7 @@ export type BackendCustomer = {
   openingBalance?: number | null;
   currentBalance?: number | null;
   notes?: string | null;
+  imageUrl?: string | null;
   isActive: boolean;
   creationDate: string;
 };
@@ -60,6 +61,7 @@ export type AddCustomerPayload = {
   creditLimit?: number;
   openingBalance?: number;
   notes?: string;
+  imageUrl?: string;
 };
 
 export type EditCustomerPayload = AddCustomerPayload & {

@@ -84,4 +84,9 @@ export const DB_KEYS = {
   accountsAssets:       'vetafarm_accounts_assets',
   accountsBankAccounts: 'vetafarm_accounts_bank_accounts',
   accountsTreasuries:   'vetafarm_accounts_treasuries',
+  // Customer sub-tables (used as fallback when backend endpoints are not deployed)
+  customerContacts:     'talaga_customer_contacts',
+  customerDrivers:      'talaga_customer_drivers',
+  customerPricing:      'talaga_customer_pricing',
+  customerNaulages:     'talaga_customer_naulages',
 } as const

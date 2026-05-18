@@ -1,4 +1,4 @@
-import { apiFetch } from "./api";
+﻿import { apiFetch } from "./api";
 
 type ServiceResult<T> = {
   isSuccess: boolean;
@@ -32,6 +32,8 @@ export type BackendWarehouse = {
   city?: string | null;
   storageType: string;
   operationStatus: string;
+  occupancyUnit?: string | null;
+  temperature?: number | null;
   areaSquareMeters?: number | null;
   totalCapacity?: number | null;
   lengthM?: number | null;
@@ -60,6 +62,8 @@ export type AddWarehousePayload = {
   city?: string;
   storageType: string;
   operationStatus?: string;
+  occupancyUnit?: string;
+  temperature?: number;
   areaSquareMeters?: number;
   totalCapacity?: number;
   lengthM?: number;
@@ -110,6 +114,7 @@ export type BackendChamber = {
   name: string;
   arName?: string | null;
   storageType: string;
+  occupancyUnit?: string | null;
   temperatureMin?: number | null;
   temperatureMax?: number | null;
   capacity?: number | null;
@@ -134,6 +139,7 @@ export type AddChamberPayload = {
   name: string;
   arName?: string;
   storageType: string;
+  occupancyUnit?: string;
   temperatureMin?: number;
   temperatureMax?: number;
   capacity?: number;
@@ -155,6 +161,7 @@ export type EditChamberPayload = {
   name: string;
   arName?: string;
   storageType: string;
+  occupancyUnit?: string;
   temperatureMin?: number;
   temperatureMax?: number;
   capacity?: number;
@@ -173,15 +180,15 @@ export type EditChamberPayload = {
 
 export async function getChambers(warehouseId?: string): Promise<BackendChamber[]> {
   const qs = warehouseId ? `?warehouseId=${warehouseId}` : "";
-  return unwrap(await apiFetch<ServiceResult<BackendChamber[]>>(`/Warehouses/GetChambers${qs}`), "فشل تحميل العنابر");
+  return unwrap(await apiFetch<ServiceResult<BackendChamber[]>>(`/Warehouses/GetChambers${qs}`), "فشل تحميل مربعات التبريد");
 }
 
 export async function addChamber(payload: AddChamberPayload): Promise<BackendChamber> {
-  return unwrap(await apiFetch<ServiceResult<BackendChamber>>("/Warehouses/AddChamber", { method: "POST", body: payload }), "فشل إضافة العنبر");
+  return unwrap(await apiFetch<ServiceResult<BackendChamber>>("/Warehouses/AddChamber", { method: "POST", body: payload }), "فشل إضافة مربع التبريد");
 }
 
 export async function editChamber(payload: EditChamberPayload): Promise<BackendChamber> {
-  return unwrap(await apiFetch<ServiceResult<BackendChamber>>("/Warehouses/EditChamber", { method: "PUT", body: payload }), "فشل تحديث العنبر");
+  return unwrap(await apiFetch<ServiceResult<BackendChamber>>("/Warehouses/EditChamber", { method: "PUT", body: payload }), "فشل تحديث مربع التبريد");
 }
 
 export async function deleteChamber(id: string): Promise<void> {

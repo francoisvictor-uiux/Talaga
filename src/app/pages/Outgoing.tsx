@@ -1,215 +1,227 @@
-import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Plus, Trash2, Printer, Save, PackageMinus, AlertCircle } from "lucide-react";
+import { Plus, Trash2, Printer, Save, PackageMinus } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { useDb } from "../context/DbContext";
 import { toast } from "sonner";
-import { cn } from "../components/ui/utils";
+import { getAllCustomers, type BackendCustomer } from "../services/customerService";
+import { getAllItems, getAllPackages, type BackendItem, type BackendPackage } from "../services/itemService";
+import { getAllWarehouses, getChambers, type BackendWarehouse, type BackendChamber } from "../services/warehouseService";
+import { addMovement } from "../services/movementService";
 
 interface OutgoingRow {
   id: number;
-  item: string;
-  pkg: string;
-  requestedQty: string;
-  availableQty: number;
+  itemId: string;
+  itemName: string;
+  packageId: string;
+  packageName: string;
+  quantity: string;
+  weight: string;
   serial: string;
-  damaged: string;
-  chamber: string;
+  chamberId: string;
 }
+
+const emptyRow = (): OutgoingRow => ({
+  id: Date.now() + Math.random(),
+  itemId: "", itemName: "", packageId: "", packageName: "",
+  quantity: "", weight: "", serial: "", chamberId: "",
+});
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.08 } } };
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
-const MOCK_AVAILABLE: Record<string, number> = {
-  "دجاج مجمد": 150, "لحم بقري": 80, "أسماك": 45, "خضروات مبردة": 200, "فواكه مبردة": 120,
-};
-
 export function Outgoing() {
-  const { customers, items, packages, warehouses } = useDb();
-  const [rows, setRows] = useState<OutgoingRow[]>([
-    { id: 1, item: "", pkg: "", requestedQty: "", availableQty: 0, serial: "", damaged: "0", chamber: "" }
-  ]);
-  const invoiceNo = "OUT-2024-" + String(Math.floor(Math.random() * 900) + 100).padStart(3, "0");
+  const [rows, setRows] = useState<OutgoingRow[]>([emptyRow()]);
+  const [customerId, setCustomerId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
+  const [movementDate, setMovementDate] = useState(new Date().toISOString().split("T")[0]);
+  const [driverName, setDriverName] = useState("");
+  const [vehiclePlate, setVehiclePlate] = useState("");
+  const [formNotes, setFormNotes] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const addRow = () => {
-    setRows([...rows, { id: Date.now(), item: "", pkg: "", requestedQty: "", availableQty: 0, serial: "", damaged: "0", chamber: "" }]);
+  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
+  const [items, setItems] = useState<BackendItem[]>([]);
+  const [packages, setPackages] = useState<BackendPackage[]>([]);
+  const [warehouses, setWarehouses] = useState<BackendWarehouse[]>([]);
+  const [chambers, setChambers] = useState<BackendChamber[]>([]);
+
+  useEffect(() => {
+    Promise.all([
+      getAllCustomers(1, 200).then(list => setCustomers(list.filter(c => c.isActive))).catch(() => {}),
+      getAllItems(1, 200).then(list => setItems(list.filter(i => i.isActive))).catch(() => {}),
+      getAllPackages(1, 200).then(list => setPackages(list.filter(p => p.isActive))).catch(() => {}),
+      getAllWarehouses(1, 200).then(list => setWarehouses(list.filter(w => w.isActive))).catch(() => {}),
+    ]);
+  }, []);
+
+  const handleWarehouseChange = async (wId: string) => {
+    setWarehouseId(wId);
+    setChambers([]);
+    if (wId) {
+      try { setChambers((await getChambers(wId)).filter(c => c.isActive)); } catch { /* ignore */ }
+    }
   };
 
-  const removeRow = (id: number) => {
-    if (rows.length === 1) return;
-    setRows(rows.filter(r => r.id !== id));
-  };
+  const addRow = () => setRows(r => [...r, emptyRow()]);
+  const removeRow = (id: number) => { if (rows.length > 1) setRows(r => r.filter(x => x.id !== id)); };
+  const updateRow = <K extends keyof OutgoingRow>(id: number, field: K, value: OutgoingRow[K]) =>
+    setRows(r => r.map(x => x.id === id ? { ...x, [field]: value } : x));
 
-  const updateRow = (id: number, field: keyof OutgoingRow, value: string | number) => {
-    setRows(rows.map(r => {
-      if (r.id !== id) return r;
-      const updated = { ...r, [field]: value };
-      if (field === "item") {
-        updated.availableQty = MOCK_AVAILABLE[value as string] || 0;
-      }
-      return updated;
-    }));
-  };
+  const totalQty = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+  const totalWeight = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0);
 
-  const hasError = (row: OutgoingRow) => Number(row.requestedQty) > row.availableQty && row.availableQty > 0 && row.requestedQty !== "";
-
-  const handleSave = () => {
-    const errors = rows.filter(hasError);
-    if (errors.length > 0) { toast.error("الكمية المطلوبة تتجاوز الكمية المتاحة"); return; }
-    toast.success(`تم حفظ فاتورة الصرف ${invoiceNo} بنجاح`);
+  const handleSave = async () => {
+    if (!customerId) { toast.error("يرجى اختيار العميل"); return; }
+    if (!warehouseId) { toast.error("يرجى اختيار الثلاجة المصدر"); return; }
+    const validRows = rows.filter(r => r.itemId && r.quantity);
+    if (!validRows.length) { toast.error("يرجى إضافة صنف واحد على الأقل مع الكمية"); return; }
+    setSaving(true);
+    try {
+      const movNum = `OUT-${Date.now()}`;
+      await Promise.all(validRows.map(row =>
+        addMovement({
+          movementNumber: movNum,
+          movementType: "Outgoing",
+          movementDate,
+          customerId,
+          itemId: row.itemId,
+          packageId: row.packageId || undefined,
+          fromWarehouseId: warehouseId,
+          fromChamberId: row.chamberId || undefined,
+          quantity: Number(row.quantity),
+          netWeightKg: row.weight ? Number(row.weight) : undefined,
+          referenceNumber: row.serial || undefined,
+          driverName: driverName || undefined,
+          vehiclePlate: vehiclePlate || undefined,
+          notes: formNotes || undefined,
+        })
+      ));
+      toast.success(`تم حفظ فاتورة الإخراج ${movNum} بنجاح — ${validRows.length} صنف`);
+      setRows([emptyRow()]);
+      setCustomerId(""); setWarehouseId(""); setChambers([]);
+      setDriverName(""); setVehiclePlate(""); setFormNotes("");
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حفظ الفاتورة");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
-      {/* Red Header */}
       <motion.div variants={anim} className="bg-red-600 text-white rounded-xl p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center">
-            <PackageMinus className="w-5 h-5" />
-          </div>
+          <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center"><PackageMinus className="w-5 h-5" /></div>
           <div>
-            <h2 className="font-bold">فاتورة صرف جديدة</h2>
-            <p className="text-red-100 text-xs">تسجيل البضاعة المنصرفة من المخزن</p>
+            <h2 className="font-bold">فاتورة إخراج جديدة</h2>
+            <p className="text-red-100 text-xs">تسجيل البضاعة المنصرفة من الثلاجة</p>
           </div>
         </div>
         <div className="text-left">
-          <p className="text-xs text-red-200">رقم الفاتورة</p>
-          <p className="font-bold font-mono text-lg">{invoiceNo}</p>
+          <p className="text-xs text-red-200">تاريخ الفاتورة</p>
+          <p className="font-bold font-mono text-lg">{movementDate}</p>
         </div>
       </motion.div>
 
-      {/* Form Header */}
       <motion.div variants={anim}>
         <Card className="border-0 shadow-sm">
           <CardContent className="p-5">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <Label>العميل *</Label>
-                <Select>
+                <Select value={customerId} onValueChange={setCustomerId}>
                   <SelectTrigger dir="rtl"><SelectValue placeholder="اختر العميل" /></SelectTrigger>
-                  <SelectContent dir="rtl">
-                    {customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
-                  </SelectContent>
+                  <SelectContent dir="rtl">{customers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
                 <Label>التاريخ *</Label>
-                <Input type="date" dir="rtl" defaultValue={new Date().toISOString().split("T")[0]} />
+                <Input type="date" dir="rtl" value={movementDate} onChange={e => setMovementDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>السائق *</Label>
-                <Select>
-                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر السائق (إلزامي)" /></SelectTrigger>
-                  <SelectContent dir="rtl">
-                    <SelectItem value="1">يوسف عبدالرحمن</SelectItem>
-                    <SelectItem value="2">طارق الحسين</SelectItem>
-                  </SelectContent>
+                <Label>الثلاجة المصدر *</Label>
+                <Select value={warehouseId} onValueChange={handleWarehouseChange}>
+                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر الثلاجة" /></SelectTrigger>
+                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>السائق</Label>
+                <Input placeholder="اسم السائق" dir="rtl" value={driverName} onChange={e => setDriverName(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>رقم السيارة</Label>
-                <Input placeholder="أ ب ج 1234" dir="rtl" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>المخزن *</Label>
-                <Select>
-                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر المخزن" /></SelectTrigger>
-                  <SelectContent dir="rtl">
-                    {warehouses.map(w => <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Input placeholder="أ ب ج 1234" dir="rtl" value={vehiclePlate} onChange={e => setVehiclePlate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>ملاحظات</Label>
-                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} />
+                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} value={formNotes} onChange={e => setFormNotes(e.target.value)} />
               </div>
             </div>
           </CardContent>
         </Card>
       </motion.div>
 
-      {/* Items Table */}
       <motion.div variants={anim}>
         <Card className="border-0 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
             <h3 className="font-semibold text-gray-800">الأصناف المنصرفة</h3>
+            <span className="text-xs text-gray-500">{rows.length} صنف</span>
           </div>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[900px]">
+              <table className="w-full text-sm min-w-[800px]">
                 <thead>
                   <tr className="bg-red-50 border-b border-red-100">
                     <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800 w-8">#</th>
                     <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">الصنف</th>
                     <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">العبوة</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">الكمية المطلوبة</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">الكمية المتاحة</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">رقم السيريال</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">العوارية (التالف)</th>
-                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">العنبر/المربع</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">الكمية</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">الوزن (كجم)</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">رقم الرسالة</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-medium text-red-800">مربع التبريد</th>
                     <th className="w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, idx) => {
-                    const err = hasError(row);
-                    return (
-                      <motion.tr
-                        key={row.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className={cn("border-b transition-colors", err ? "bg-red-50/50" : "hover:bg-gray-50/30")}
-                      >
-                        <td className="px-3 py-2 text-gray-500 text-xs">{idx + 1}</td>
-                        <td className="px-2 py-1.5">
-                          <Select onValueChange={v => updateRow(row.id, "item", v)}>
-                            <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
-                            <SelectContent dir="rtl">
-                              {items.map(i => <SelectItem key={i.id} value={i.name}>{i.name}</SelectItem>)}
-                            </SelectContent>
+                  {rows.map((row, idx) => (
+                    <motion.tr key={row.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="border-b hover:bg-gray-50/30 transition-colors">
+                      <td className="px-3 py-2 text-gray-500 text-xs">{idx + 1}</td>
+                      <td className="px-2 py-1.5">
+                        <Select value={row.itemId} onValueChange={v => { const i = items.find(x => x.id === v); updateRow(row.id, "itemId", v); updateRow(row.id, "itemName", i?.arName || i?.name || ""); }}>
+                          <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
+                          <SelectContent dir="rtl">{items.map(i => <SelectItem key={i.id} value={i.id}>{i.arName || i.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <Select value={row.packageId} onValueChange={v => { const p = packages.find(x => x.id === v); updateRow(row.id, "packageId", v); updateRow(row.id, "packageName", p?.arName || p?.name || ""); }}>
+                          <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="العبوة" /></SelectTrigger>
+                          <SelectContent dir="rtl">{packages.map(p => <SelectItem key={p.id} value={p.id}>{p.arName || p.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-20" type="number" placeholder="0" dir="rtl" value={row.quantity} onChange={e => updateRow(row.id, "quantity", e.target.value)} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" type="number" placeholder="0" dir="rtl" value={row.weight} onChange={e => updateRow(row.id, "weight", e.target.value)} /></td>
+                      <td className="px-2 py-1.5"><Input className="h-8 text-xs w-28" placeholder="SN-XXXXX" dir="rtl" value={row.serial} onChange={e => updateRow(row.id, "serial", e.target.value)} /></td>
+                      <td className="px-2 py-1.5">
+                        {chambers.length > 0 ? (
+                          <Select value={row.chamberId} onValueChange={v => updateRow(row.id, "chamberId", v)}>
+                            <SelectTrigger className="h-8 text-xs w-28" dir="rtl"><SelectValue placeholder="مربع التبريد" /></SelectTrigger>
+                            <SelectContent dir="rtl">{chambers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name || c.code}</SelectItem>)}</SelectContent>
                           </Select>
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <Select>
-                            <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="العبوة" /></SelectTrigger>
-                            <SelectContent dir="rtl">
-                              {packages.map(p => <SelectItem key={p.id} value={p.type}>{p.type}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <div className="relative">
-                            <Input
-                              className={cn("h-8 text-xs w-24", err ? "border-red-500 bg-red-50" : "")}
-                              type="number" placeholder="0" dir="rtl"
-                              value={row.requestedQty}
-                              onChange={e => updateRow(row.id, "requestedQty", e.target.value)}
-                            />
-                            {err && <AlertCircle className="absolute left-1 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-red-500" />}
-                          </div>
-                          {err && <p className="text-red-500 text-xs mt-0.5">يتجاوز المتاح!</p>}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <span className={cn("text-xs font-medium px-2 py-0.5 rounded", row.availableQty > 0 ? "text-green-700 bg-green-100" : "text-gray-400 bg-gray-100")}>
-                            {row.availableQty || "—"} طرد
-                          </span>
-                        </td>
-                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-28" placeholder="SN-XXXXX" dir="rtl" /></td>
-                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-20" type="number" defaultValue="0" dir="rtl" /></td>
-                        <td className="px-2 py-1.5"><Input className="h-8 text-xs w-24" placeholder="عنبر A-1" dir="rtl" /></td>
-                        <td className="px-2 py-1.5">
-                          <button onClick={() => removeRow(row.id)} className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </motion.tr>
-                    );
-                  })}
+                        ) : (
+                          <Input className="h-8 text-xs w-28" placeholder="اختر ثلاجة أولاً" dir="rtl" disabled />
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <button onClick={() => removeRow(row.id)} className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </td>
+                    </motion.tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -222,25 +234,28 @@ export function Outgoing() {
         </Card>
       </motion.div>
 
-      {/* Footer */}
       <motion.div variants={anim}>
         <Card className="border-0 shadow-sm bg-red-50 border border-red-100">
-          <CardContent className="p-4 flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-8">
-              <div>
-                <p className="text-xs text-gray-500">إجمالي الطرود المنصرفة</p>
-                <p className="text-2xl font-bold text-red-700">
-                  {rows.reduce((s, r) => s + (Number(r.requestedQty) || 0), 0).toLocaleString()}
-                </p>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-8">
+                <div>
+                  <p className="text-xs text-gray-500">إجمالي الطرود</p>
+                  <p className="text-2xl font-bold text-red-700">{totalQty.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">إجمالي الوزن</p>
+                  <p className="text-2xl font-bold text-red-700">{totalWeight.toLocaleString()} كجم</p>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" className="border-red-600 text-red-700 hover:bg-red-50 gap-2">
-                <Printer className="w-4 h-4" />طباعة
-              </Button>
-              <Button onClick={handleSave} className="bg-red-600 hover:bg-red-700 text-white gap-2">
-                <Save className="w-4 h-4" />حفظ وطباعة
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" className="border-red-600 text-red-700 hover:bg-red-50 gap-2">
+                  <Printer className="w-4 h-4" />طباعة
+                </Button>
+                <Button onClick={handleSave} disabled={saving} className="bg-red-600 hover:bg-red-700 text-white gap-2">
+                  <Save className="w-4 h-4" />{saving ? "جاري الحفظ..." : "حفظ الفاتورة"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

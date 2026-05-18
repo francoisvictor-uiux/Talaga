@@ -1,4 +1,4 @@
-import { Bell, User, Search, ChevronDown } from "lucide-react";
+﻿import { Bell, User, Search, ChevronDown } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -14,7 +14,7 @@ import { useAuth } from "../../context/AuthContext";
 const ROLE_LABELS: Record<string, string> = {
   Admin: "مدير النظام",
   Manager: "مدير",
-  Warehouse: "عامل مخزن",
+  Warehouse: "عامل ثلاجة",
   Accountant: "محاسب",
   Viewer: "مشاهدة فقط",
 };
@@ -28,7 +28,7 @@ function getInitials(name: string): string {
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "لوحة التحكم",
-  "/warehouses": "المخازن والثلاجات",
+  "/warehouses": "الثلاجات",
   "/items": "الأصناف والعبوات",
   "/customers": "إدارة العملاء",
   "/employees": "الموظفون",
@@ -45,7 +45,7 @@ export function TopBar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
-  const title = pageTitles[location.pathname] || "نظام مخازن التبريد";
+  const title = pageTitles[location.pathname] || "نظام ثلاجات التبريد";
 
   const displayName = user?.arName?.trim() || user?.fullName || "مستخدم";
   const roleLabel = user?.roles?.[0] ? (ROLE_LABELS[user.roles[0]] ?? user.roles[0]) : "";

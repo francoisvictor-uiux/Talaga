@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Eye, EyeOff, Snowflake, Fingerprint } from "lucide-react";
@@ -90,7 +90,7 @@ export function Login() {
             >
               <Snowflake className="w-8 h-8 text-white" />
             </motion.div>
-            <h1 className="text-2xl font-bold text-gray-800">نظام إدارة مخازن التبريد</h1>
+            <h1 className="text-2xl font-bold text-gray-800">نظام إدارة ثلاجات التبريد</h1>
             <p className="text-gray-500 text-sm mt-1">Cold Storage Warehouse Management System</p>
           </div>
 

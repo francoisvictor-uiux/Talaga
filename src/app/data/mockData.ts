@@ -1,4 +1,4 @@
-// ===== WAREHOUSES =====
+﻿// ===== WAREHOUSES =====
 export const warehouses = [
   { id: 1, letter: "A", name: "ثلاجة المنطقة الأولى",    storageType: "تجميد", chambers: 3, totalCapacity: 100, occupied: 78,  machineStatus: "تشغيل",  machineType: "كمبروسور مكثف هواء",  machinePower: 50, dailyRent: 2.5, monthlyRent: 65, notes: "" },
   { id: 2, letter: "B", name: "ثلاجة الحبوب والبقوليات", storageType: "تبريد", chambers: 4, totalCapacity: 150, occupied: 92,  machineStatus: "تشغيل",  machineType: "كمبروسور أمونيا",     machinePower: 75, dailyRent: 1.8, monthlyRent: 48, notes: "" },
@@ -47,7 +47,7 @@ export const customerDrivers = [
 export const customerContacts = [
   { id: 1, customerId: 1, name: "إبراهيم سالم", phone: "01098765432", role: "مدير المشتريات" },
   { id: 2, customerId: 1, name: "سمية حسن",     phone: "01187654321", role: "محاسبة" },
-  { id: 3, customerId: 2, name: "عصام الديب",   phone: "01276543210", role: "مسؤول المخزن" },
+  { id: 3, customerId: 2, name: "عصام الديب",   phone: "01276543210", role: "مسؤول الثلاجة" },
 ];
 
 export const customerPricing = [
@@ -58,29 +58,29 @@ export const customerPricing = [
 
 // ===== CUSTOMER ITEMS & NAULAGE (نولون رسوم التداول) =====
 export const customerItems = [
-  { id: 1,  customerId: 1, itemName: "دجاج مجمد",    naulage: 15 },
-  { id: 2,  customerId: 1, itemName: "لحم بقري",     naulage: 20 },
-  { id: 3,  customerId: 1, itemName: "أسماك",         naulage: 18 },
-  { id: 4,  customerId: 2, itemName: "خضروات مبردة", naulage: 8  },
-  { id: 5,  customerId: 2, itemName: "فواكه مبردة",  naulage: 10 },
-  { id: 6,  customerId: 3, itemName: "دجاج مجمد",    naulage: 12 },
-  { id: 7,  customerId: 3, itemName: "لحم بقري",     naulage: 18 },
-  { id: 8,  customerId: 3, itemName: "جبنة رومي",    naulage: 25 },
-  { id: 9,  customerId: 4, itemName: "معجنات مجمدة", naulage: 14 },
-  { id: 10, customerId: 5, itemName: "بطاطس",         naulage: 7  },
-  { id: 11, customerId: 6, itemName: "دجاج مجمد",    naulage: 13 },
-  { id: 12, customerId: 6, itemName: "زبيب",          naulage: 22 },
-  { id: 13, customerId: 6, itemName: "عسل طبيعي",    naulage: 30 },
+  { id: 1,  customerId: 1, itemName: "دجاج مجمد",    naulage: 15, naulageUnit: "طرد" },
+  { id: 2,  customerId: 1, itemName: "لحم بقري",     naulage: 20, naulageUnit: "طرد" },
+  { id: 3,  customerId: 1, itemName: "أسماك",         naulage: 18, naulageUnit: "كارتونة" },
+  { id: 4,  customerId: 2, itemName: "خضروات مبردة", naulage: 8,  naulageUnit: "صندوق" },
+  { id: 5,  customerId: 2, itemName: "فواكه مبردة",  naulage: 10, naulageUnit: "صندوق" },
+  { id: 6,  customerId: 3, itemName: "دجاج مجمد",    naulage: 12, naulageUnit: "طرد" },
+  { id: 7,  customerId: 3, itemName: "لحم بقري",     naulage: 18, naulageUnit: "طرد" },
+  { id: 8,  customerId: 3, itemName: "جبنة رومي",    naulage: 25, naulageUnit: "كارتونة" },
+  { id: 9,  customerId: 4, itemName: "معجنات مجمدة", naulage: 14, naulageUnit: "كارتونة" },
+  { id: 10, customerId: 5, itemName: "بطاطس",         naulage: 7,  naulageUnit: "شوال" },
+  { id: 11, customerId: 6, itemName: "دجاج مجمد",    naulage: 13, naulageUnit: "طرد" },
+  { id: 12, customerId: 6, itemName: "زبيب",          naulage: 22, naulageUnit: "شوال" },
+  { id: 13, customerId: 6, itemName: "عسل طبيعي",    naulage: 30, naulageUnit: "برميل" },
 ];
 
 // ===== EMPLOYEES =====
 export const employees = [
   { id: 1, name: "أحمد محمد علي", role: "مدير", status: "active", phone: "01011111111", email: "ahmed@coldstorage.eg", salary: 8500, joinDate: "2020-03-15" },
   { id: 2, name: "سارة عبدالله المحمدي", role: "محاسب", status: "active", phone: "01122222222", email: "sara@coldstorage.eg", salary: 6000, joinDate: "2021-06-01" },
-  { id: 3, name: "خالد عمر الشيمي", role: "عامل مخزن", status: "active", phone: "01233333333", email: "khaled@coldstorage.eg", salary: 4500, joinDate: "2019-11-10" },
-  { id: 4, name: "منى سعيد العطار", role: "عامل مخزن", status: "inactive", phone: "01044444444", email: "mona@coldstorage.eg", salary: 4500, joinDate: "2022-01-20" },
-  { id: 5, name: "محمود علي السيد", role: "عامل مخزن", status: "active", phone: "01155555555", email: "mahmoud@coldstorage.eg", salary: 3000, joinDate: "2023-05-05" },
-  { id: 6, name: "نور محمد الصعيدي", role: "عامل مخزن", status: "active", phone: "01266666666", email: "nour@coldstorage.eg", salary: 3000, joinDate: "2023-08-15" },
+  { id: 3, name: "خالد عمر الشيمي", role: "عامل ثلاجة", status: "active", phone: "01233333333", email: "khaled@coldstorage.eg", salary: 4500, joinDate: "2019-11-10" },
+  { id: 4, name: "منى سعيد العطار", role: "عامل ثلاجة", status: "inactive", phone: "01044444444", email: "mona@coldstorage.eg", salary: 4500, joinDate: "2022-01-20" },
+  { id: 5, name: "محمود علي السيد", role: "عامل ثلاجة", status: "active", phone: "01155555555", email: "mahmoud@coldstorage.eg", salary: 3000, joinDate: "2023-05-05" },
+  { id: 6, name: "نور محمد الصعيدي", role: "عامل ثلاجة", status: "active", phone: "01266666666", email: "nour@coldstorage.eg", salary: 3000, joinDate: "2023-08-15" },
 ];
 
 // ===== SALARY RECORDS =====
@@ -207,7 +207,7 @@ export const tasks = [
 export const auditLogs = [
   { id: 1, datetime: "2024-01-18 09:15:32", user: "أحمد محمد", module: "الوارد", action: "إضافة", details: "تم إضافة فاتورة INV-2024-008", ip: "192.168.1.10" },
   { id: 2, datetime: "2024-01-18 08:45:10", user: "سارة المحمدي", module: "السندات", action: "إضافة", details: "تم إضافة سند قبض RV-2024-003", ip: "192.168.1.11" },
-  { id: 3, datetime: "2024-01-17 16:30:05", user: "خالد الشيمي", module: "المخازن", action: "تعديل", details: "تم تعديل بيانات ثلاجة اللحوم", ip: "192.168.1.12" },
+  { id: 3, datetime: "2024-01-17 16:30:05", user: "خالد الشيمي", module: "الثلاجات", action: "تعديل", details: "تم تعديل بيانات ثلاجة اللحوم", ip: "192.168.1.12" },
   { id: 4, datetime: "2024-01-17 14:20:15", user: "أحمد محمد", module: "العملاء", action: "إضافة", details: "تم إضافة عميل جديد C007", ip: "192.168.1.10" },
   { id: 5, datetime: "2024-01-17 11:10:45", user: "سارة المحمدي", module: "الموظفون", action: "تعديل", details: "تم تعديل راتب الموظف محمود السيد", ip: "192.168.1.11" },
   { id: 6, datetime: "2024-01-16 15:05:22", user: "خالد الشيمي", module: "الأصناف", action: "حذف", details: "تم حذف الصنف I009 (منتجات تالفة)", ip: "192.168.1.12" },
@@ -225,7 +225,7 @@ export const alerts = [
 
 // ===== REPORT CATEGORIES =====
 export const reportCategories = [
-  { id: "warehouse", label: "تقارير المخازن", items: ["مخزن محدد", "كل المخازن", "تقرير الطاقة الاستيعابية"] },
+  { id: "warehouse", label: "تقارير الثلاجات", items: ["ثلاجة محدد", "كل الثلاجات", "تقرير الطاقة الاستيعابية"] },
   { id: "customer", label: "تقارير العملاء", items: ["كشف حساب عميل", "أكتر العملاء تخزيناً", "العملاء المدينين"] },
   { id: "financial", label: "تقارير مالية", items: ["إيرادات التخزين", "المصروفات التشغيلية", "الأرباح والخسائر"] },
   { id: "movement", label: "تقارير الحركات", items: ["تقرير الوارد", "تقرير المنصرف", "تقرير التحويلات"] },

@@ -19,3 +19,13 @@ export async function getJobTitlesDDL(): Promise<JobTitleOption[]> {
   }
   return res.data ?? [];
 }
+
+export async function addJobTitle(arName: string): Promise<JobTitleOption> {
+  const code = `JT-${Date.now()}`;
+  const res = await apiFetch<ServiceResult<{ id: string; code: string; name: string; arName?: string | null }>>(
+    "/JobTitles/AddJobTitle",
+    { method: "POST", body: { code, name: arName, arName } },
+  );
+  if (!res.isSuccess || !res.data) throw new Error(res.errorMessages?.[0] ?? "فشل إضافة المسمى الوظيفي");
+  return { id: res.data.id, name: res.data.name, arName: res.data.arName };
+}

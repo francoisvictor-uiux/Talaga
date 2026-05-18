@@ -52,6 +52,7 @@ export type AddEmployeePayload = {
   code: string;
   fullName: string;
   arName?: string;
+  nationalId?: string;
   phone?: string;
   email?: string;
   jobTitleId?: string;

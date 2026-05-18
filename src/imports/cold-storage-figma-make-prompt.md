@@ -1,11 +1,11 @@
-# Cold Storage ERP — Figma Make Prompt
-## نظام إدارة مخازن التبريد
+﻿# Cold Storage ERP — Figma Make Prompt
+## نظام إدارة ثلاجات التبريد
 
 ---
 
 ## Project Identity
 
-**App Name:** نظام إدارة مخازن التبريد (Cold Storage Warehouse Management System)
+**App Name:** نظام إدارة ثلاجات التبريد (Cold Storage Warehouse Management System)
 **Language:** Arabic (RTL — Right to Left)
 **Primary Color:** Blue (#1E40AF primary, #3B82F6 accent, #DBEAFE background tints)
 **Status Colors:**
@@ -35,7 +35,7 @@ Every screen shares this shell:
 
 **Sidebar Navigation Items (Arabic, RTL icons on right):**
 1. 🏠 لوحة التحكم
-2. 🏭 المخازن والثلاجات
+2. 🏭 الثلاجات
 3. 📦 الأصناف والعبوات
 4. 👥 العملاء
 5. 👨‍💼 الموظفون
@@ -59,7 +59,7 @@ Every screen shares this shell:
 
 **Elements:**
 - Company logo at top center (snowflake / warehouse icon)
-- Title: "نظام إدارة مخازن التبريد"
+- Title: "نظام إدارة ثلاجات التبريد"
 - Username field (اسم المستخدم) — RTL input
 - Password field (كلمة المرور) — RTL input with show/hide toggle
 - "تسجيل الدخول" primary blue button (full width)
@@ -77,7 +77,7 @@ Every screen shares this shell:
 **Layout:** Header stats row + 2-column grid of charts and alerts
 
 **Top KPI Cards (4 cards in a row):**
-1. 📦 إجمالي الأصناف المخزنة — number in blue
+1. 📦 إجمالي الأصناف الثلاجةة — number in blue
 2. 🏭 نسبة الإشغال — percentage with circular progress bar
 3. 💰 إيرادات اليوم — amount in green
 4. ⚠️ تنبيهات منتهية الصلاحية — number in orange/red badge
@@ -92,14 +92,14 @@ Every screen shares this shell:
 
 ---
 
-## Screen 3: Warehouses (المخازن والثلاجات)
+## Screen 3: Warehouses (الثلاجات)
 
-**Purpose:** Browse and manage the warehouse hierarchy: Warehouse → Chamber (عنبر) → Cell (مربع)
+**Purpose:** Browse and manage the warehouse hierarchy: Warehouse → Chamber (مربع تبريد) → Cell (مربع)
 
 **Layout:** Tree/List view with expandable rows + detail panel on right
 
 **Main Table Columns:**
-- اسم الثلاجة | عدد العنابر | السعة الكلية | المشغول | المتاح | حالة الماكينة (badge: تشغيل/إيقاف/صيانة) | الإجراءات
+- اسم الثلاجة | عدد مربعات التبريد | السعة الكلية | المشغول | المتاح | حالة الماكينة (badge: تشغيل/إيقاف/صيانة) | الإجراءات
 
 **Capacity Display:** Small horizontal progress bar (blue fill) inline with numbers
 
@@ -108,7 +108,7 @@ Every screen shares this shell:
 - صيانة = Orange badge
 - إيقاف = Red badge
 
-**Actions per row:** تعديل | عرض العنابر (expand tree) | QR
+**Actions per row:** تعديل | عرض مربعات التبريد (expand tree) | QR
 
 **Add Warehouse Button:** "+ إضافة ثلاجة" — top right, blue
 
@@ -139,7 +139,7 @@ Every screen shares this shell:
 **Layout:** Searchable/filterable table + slide-in detail drawer
 
 **Table Columns:**
-- كود العميل | اسم العميل | الهاتف | الرصيد النقدي (green if positive, red if negative) | عدد الأصناف المخزنة | المندوب | الإجراءات
+- كود العميل | اسم العميل | الهاتف | الرصيد النقدي (green if positive, red if negative) | عدد الأصناف الثلاجةة | المندوب | الإجراءات
 
 **Customer Detail Drawer (right side, full height):**
 Tabs inside drawer:
@@ -161,13 +161,13 @@ Tabs inside drawer:
 **Employee Card:**
 - Avatar circle (initials if no photo)
 - Name (bold)
-- Role badge (مدير/أمين مخزن/محاسب/عامل)
+- Role badge (مدير/أمين ثلاجة/محاسب/عامل)
 - Status dot (active/inactive)
 - Quick actions: عرض | تعديل | الصلاحيات
 
 **Permissions Modal:**
 Checklist grouped by module — e.g.:
-- المخازن: [عرض] [إضافة] [تعديل] [حذف]
+- الثلاجات: [عرض] [إضافة] [تعديل] [حذف]
 - الحركات: [عرض] [إضافة] ...
 
 **Other Tabs:** المرتبات | الإجازات | السلف والغياب
@@ -187,11 +187,11 @@ Checklist grouped by module — e.g.:
 - التاريخ (date picker, RTL)
 - السائق (dropdown from customer's driver list)
 - رقم السيارة (auto-fill from driver)
-- المخزن المستلم (dropdown)
+- الثلاجة المستلم (dropdown)
 - ملاحظات (text area)
 
 **Items Table (add rows dynamically):**
-| # | الصنف | العبوة | الكمية | الوزن | تاريخ الإنتاج | تاريخ الانتهاء | رقم السيريال | العنبر/المربع | حذف |
+| # | الصنف | العبوة | الكمية | الوزن | تاريخ الإنتاج | تاريخ الانتهاء | رقم السيريال | مربع التبريد/المربع | حذف |
 
 **Footer:**
 - "إضافة صنف" row button
@@ -214,11 +214,11 @@ Checklist grouped by module — e.g.:
 - التاريخ
 - السائق (required — cannot save without driver)
 - رقم السيارة
-- المخزن
+- الثلاجة
 - ملاحظات
 
 **Items Table:**
-| # | الصنف | العبوة | الكمية المطلوبة | الكمية المتاحة (read-only, from stock) | رقم السيريال | العوارية (التالف) | العنبر/المربع | حذف |
+| # | الصنف | العبوة | الكمية المطلوبة | الكمية المتاحة (read-only, from stock) | رقم السيريال | العوارية (التالف) | مربع التبريد/المربع | حذف |
 
 **Validation:** Red warning if requested qty > available qty
 
@@ -235,18 +235,18 @@ Checklist grouped by module — e.g.:
 **Color Theme:** Orange accent (#EA580C)
 
 **Two Sub-tabs:**
-1. تحويل بين مخازن
+1. تحويل بين ثلاجات
 2. تحويل بين عملاء
 
 **Between Warehouses Form:**
-- من مخزن → إلى مخزن (both dropdown)
+- من ثلاجة → إلى ثلاجة (both dropdown)
 - الصنف | العبوة | الكمية
 - ملاحظات
 - "تأكيد التحويل" orange button
 
 **Between Customers Form:**
 - من عميل → إلى عميل
-- الصنف | الكمية | العنبر
+- الصنف | الكمية | مربع التبريد
 - "تأكيد التحويل" orange button
 
 ---
@@ -255,7 +255,7 @@ Checklist grouped by module — e.g.:
 
 **Purpose:** Compare theoretical vs actual stock, flag shortages
 
-**Layout:** Filter bar (مخزن / عميل / صنف / تاريخ) + results table
+**Layout:** Filter bar (ثلاجة / عميل / صنف / تاريخ) + results table
 
 **Table Columns:**
 - الصنف | العميل | الرصيد النظري | الجرد الفعلي | الفرق | حالة الفرق (badge: مطابق/عجز/زيادة)
@@ -294,7 +294,7 @@ Checklist grouped by module — e.g.:
 **Layout:** Left sidebar with report categories + main content area
 
 **Report Categories:**
-- تقارير المخازن (مخزن محدد / كل المخازن)
+- تقارير الثلاجات (ثلاجة محدد / كل الثلاجات)
 - تقارير العملاء (كشف حساب عميل)
 - تقارير مالية (إيرادات / مصروفات / أرباح)
 - تقارير الحركات (وارد / منصرف / تحويلات)

@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
-import { Shield, Search, ChevronDown } from "lucide-react";
+import { Shield, Search } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Pagination, usePagination } from "../components/ui/Pagination";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { Button } from "../components/ui/button";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
-import React from "react";
 import { getAllAuditLogs, type BackendAuditLog } from "../services/auditLogService";
 
 const actionColors: Record<string, string> = {
@@ -17,20 +18,18 @@ const actionColors: Record<string, string> = {
   "حذف": "bg-red-100 text-red-700 border-red-200",
 };
 
-const modules = ["الكل", "الوارد", "المنصرف", "المخازن", "العملاء", "الموظفون", "الأصناف", "السندات", "الإعدادات"];
+const modules = [
+  "الكل",
+  "الثلاجات",
+  "مربعات التبريد",
+  "الأصناف",
+  "الحركات",
+  "العملاء",
+  "الموظفون",
+];
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
 const anim = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
-
-type AuditView = {
-  id: string;
-  datetime: string;
-  user: string;
-  module: string;
-  action: string;
-  details: string;
-  ip: string;
-};
 
 const formatDateTime = (iso: string) => {
   if (!iso) return "";
@@ -40,27 +39,19 @@ const formatDateTime = (iso: string) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-const mapAuditLog = (l: BackendAuditLog): AuditView => ({
-  id: l.id,
-  datetime: formatDateTime(l.dateTime),
-  user: l.userName || "—",
-  module: l.module,
-  action: l.action,
-  details: l.details,
-  ip: l.ipAddress || "—",
-});
-
 export function AuditLog() {
   const [rawLogs, setRawLogs] = useState<BackendAuditLog[]>([]);
   const [search, setSearch] = useState("");
   const [moduleFilter, setModuleFilter] = useState("الكل");
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [selected, setSelected] = useState<BackendAuditLog | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const list = await getAllAuditLogs({ pageIndex: 1, pageSize: 200 });
+        const list = await getAllAuditLogs({ pageIndex: 1, pageSize: 500 });
         if (!cancelled) setRawLogs(list);
       } catch (err: any) {
         if (!cancelled) toast.error(err?.message ?? "فشل تحميل سجل التعديلات");
@@ -69,13 +60,22 @@ export function AuditLog() {
     return () => { cancelled = true; };
   }, []);
 
-  const auditLogs = useMemo<AuditView[]>(() => rawLogs.map(mapAuditLog), [rawLogs]);
-
-  const filtered = auditLogs.filter(log => {
-    const matchSearch = log.user.includes(search) || log.details.includes(search);
-    const matchModule = moduleFilter === "الكل" || log.module === moduleFilter;
-    return matchSearch && matchModule;
-  });
+  const filtered = useMemo(() => {
+    const from = fromDate ? new Date(fromDate).getTime() : null;
+    const to = toDate ? new Date(toDate).getTime() + 86_400_000 : null;
+    return rawLogs.filter(log => {
+      const userName = log.userName || "";
+      const matchSearch = !search ||
+        userName.includes(search) ||
+        log.details.includes(search) ||
+        (log.entityId ?? "").includes(search);
+      const matchModule = moduleFilter === "الكل" || log.module === moduleFilter;
+      const t = new Date(log.dateTime).getTime();
+      const matchFrom = from === null || t >= from;
+      const matchTo = to === null || t <= to;
+      return matchSearch && matchModule && matchFrom && matchTo;
+    });
+  }, [rawLogs, search, moduleFilter, fromDate, toDate]);
 
   const pager = usePagination(filtered, 10);
 
@@ -88,7 +88,7 @@ export function AuditLog() {
       {/* Notice Banner */}
       <motion.div variants={anim} className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
         <Shield className="w-4 h-4 text-blue-600 flex-shrink-0" />
-        <p className="text-sm text-blue-700">هذه الصفحة للقراءة فقط. يتم تسجيل جميع الإجراءات تلقائياً ولا يمكن تعديلها.</p>
+        <p className="text-sm text-blue-700">يتم تسجيل كل العمليات (إضافة / تعديل / حذف) لكل الموديولات تلقائياً.</p>
       </motion.div>
 
       {/* Filters */}
@@ -105,16 +105,16 @@ export function AuditLog() {
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
-            <Select onValueChange={setModuleFilter}>
+            <Select value={moduleFilter} onValueChange={setModuleFilter}>
               <SelectTrigger className="w-40" dir="rtl"><SelectValue placeholder="اختر الموديول" /></SelectTrigger>
               <SelectContent dir="rtl">
                 {modules.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
               </SelectContent>
             </Select>
             <div className="flex items-center gap-2">
-              <Input type="date" className="w-36" />
+              <Input type="date" className="w-36" value={fromDate} onChange={e => setFromDate(e.target.value)} />
               <span className="text-gray-400 text-xs">إلى</span>
-              <Input type="date" className="w-36" />
+              <Input type="date" className="w-36" value={toDate} onChange={e => setToDate(e.target.value)} />
             </div>
             <div className="text-xs text-gray-500 mr-auto">{filtered.length} سجل</div>
           </CardContent>
@@ -139,46 +139,42 @@ export function AuditLog() {
                 </thead>
                 <tbody>
                   {pager.paginated.map((log, idx) => (
-                    <React.Fragment key={log.id}>
-                      <motion.tr
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: idx * 0.04 }}
-                        className={cn("border-b hover:bg-gray-50/50 transition-colors cursor-pointer", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}
-                        onClick={() => setExpanded(expanded === log.id ? null : log.id)}
-                      >
-                        <td className="px-4 py-3 font-mono text-xs text-gray-500">{log.datetime}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs text-blue-700 font-semibold">
-                              {log.user.charAt(0)}
-                            </div>
-                            <span className="text-gray-700">{log.user}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">{log.module}</td>
-                        <td className="px-4 py-3">
-                          <span className={cn("px-2 py-0.5 rounded-full text-xs border", actionColors[log.action])}>
-                            {log.action}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 max-w-xs">
-                          <div className="flex items-center gap-1">
-                            <span className="truncate">{log.details}</span>
-                            <ChevronDown className={cn("w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform", expanded === log.id && "rotate-180")} />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-gray-400">{log.ip}</td>
-                      </motion.tr>
-                      {expanded === log.id && (
-                        <tr className="bg-blue-50/50">
-                          <td colSpan={6} className="px-8 py-3 text-sm text-gray-700 border-b">
-                            <strong>التفاصيل الكاملة: </strong>{log.details}
-                          </td>
-                        </tr>
+                    <motion.tr
+                      key={log.id}
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.02 }}
+                      className={cn(
+                        "border-b hover:bg-blue-50/40 transition-colors cursor-pointer",
+                        idx % 2 === 0 ? "bg-white" : "bg-gray-50/30",
                       )}
-                    </React.Fragment>
+                      onClick={() => setSelected(log)}
+                      title="عرض التفاصيل"
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-gray-500">{formatDateTime(log.dateTime)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs text-blue-700 font-semibold">
+                            {(log.userName || "؟").charAt(0)}
+                          </div>
+                          <span className="text-gray-700">{log.userName || "—"}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">{log.module}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn("px-2 py-0.5 rounded-full text-xs border", actionColors[log.action] ?? "bg-gray-100 text-gray-700 border-gray-200")}>
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 max-w-xs truncate">{log.details}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-400">{log.ipAddress || "—"}</td>
+                    </motion.tr>
                   ))}
+                  {pager.paginated.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-400">لا توجد سجلات مطابقة</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -190,6 +186,58 @@ export function AuditLog() {
           </CardContent>
         </Card>
       </motion.div>
+
+      {/* Details dialog */}
+      <Dialog open={selected !== null} onOpenChange={(o) => { if (!o) setSelected(null); }}>
+        <DialogContent dir="rtl" className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-blue-600" />
+              تفاصيل السجل
+            </DialogTitle>
+          </DialogHeader>
+          {selected && (
+            <div className="space-y-3 text-sm">
+              <DetailRow label="التاريخ والوقت" value={formatDateTime(selected.dateTime)} mono />
+              <DetailRow label="المستخدم" value={selected.userName || "—"} />
+              <DetailRow label="الموديول" value={selected.module} />
+              <DetailRow
+                label="نوع الإجراء"
+                valueElement={
+                  <span className={cn("px-2 py-0.5 rounded-full text-xs border w-fit", actionColors[selected.action] ?? "bg-gray-100 text-gray-700 border-gray-200")}>
+                    {selected.action}
+                  </span>
+                }
+              />
+              <DetailRow label="نوع الكيان" value={selected.entityName || "—"} />
+              <DetailRow label="معرّف الكيان" value={selected.entityId || "—"} mono />
+              <DetailRow label="IP العنوان" value={selected.ipAddress || "—"} mono />
+              <div className="pt-2 border-t">
+                <div className="text-xs text-gray-500 mb-1">التفاصيل الكاملة</div>
+                <div className="bg-gray-50 border border-gray-200 rounded p-3 text-gray-800 whitespace-pre-wrap leading-relaxed">
+                  {selected.details}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelected(null)}>إغلاق</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
+  );
+}
+
+function DetailRow({ label, value, valueElement, mono = false }: { label: string; value?: string; valueElement?: React.ReactNode; mono?: boolean }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span className="text-xs text-gray-500 mt-1 min-w-28">{label}</span>
+      {valueElement ? (
+        <div className="flex-1 text-right">{valueElement}</div>
+      ) : (
+        <span className={cn("text-gray-800 text-sm flex-1 text-right break-all", mono && "font-mono text-xs")}>{value}</span>
+      )}
+    </div>
   );
 }

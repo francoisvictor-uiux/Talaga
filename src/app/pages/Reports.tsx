@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+﻿import { motion, AnimatePresence } from "motion/react";
 import { BarChart3, Play, Download, Printer, FileText, TrendingUp, Package, Wallet, Users, ChevronLeft } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
@@ -7,8 +6,10 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { useDb } from "../context/DbContext";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useEffect, useState } from "react";
+import { getAllCustomers, type BackendCustomer } from "../services/customerService";
+import { getAllWarehouses, type BackendWarehouse } from "../services/warehouseService";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
 
@@ -24,7 +25,7 @@ const reportCategories = [
   {
     id: "inventory", label: "المخزون", icon: Package, color: "green",
     bg: "bg-green-50", iconBg: "bg-green-100", iconColor: "text-green-600", activeBg: "bg-green-600",
-    items: ["رصيد المخزون", "المخزون حسب المخزن", "المخزون حسب العميل", "حركة الصنف"],
+    items: ["رصيد المخزون", "المخزون حسب الثلاجة", "المخزون حسب العميل", "حركة الصنف"],
   },
   {
     id: "financial", label: "مالي", icon: Wallet, color: "orange",
@@ -47,12 +48,18 @@ const mockReportData = [
 ];
 
 export function Reports() {
-  const { customers, warehouses } = useDb();
+  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
+  const [warehouses, setWarehouses] = useState<BackendWarehouse[]>([]);
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
   const [showResults, setShowResults] = useState(false);
 
   const activeCat = reportCategories.find(c => c.id === selectedCat);
+
+  useEffect(() => {
+    getAllCustomers(1, 200).then(l => setCustomers(l.filter(c => c.isActive))).catch(() => {});
+    getAllWarehouses(1, 200).then(l => setWarehouses(l.filter(w => w.isActive))).catch(() => {});
+  }, []);
 
   const runReport = () => {
     setShowResults(true);
@@ -154,17 +161,17 @@ export function Reports() {
                     <SelectTrigger dir="rtl"><SelectValue placeholder="كل العملاء" /></SelectTrigger>
                     <SelectContent dir="rtl">
                       <SelectItem value="all">كل العملاء</SelectItem>
-                      {customers.map(c => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                      {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.arName || c.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs">المخزن</Label>
+                  <Label className="text-xs">الثلاجة</Label>
                   <Select>
-                    <SelectTrigger dir="rtl"><SelectValue placeholder="كل المخازن" /></SelectTrigger>
+                    <SelectTrigger dir="rtl"><SelectValue placeholder="كل الثلاجات" /></SelectTrigger>
                     <SelectContent dir="rtl">
-                      <SelectItem value="all">كل المخازن</SelectItem>
-                      {warehouses.map(w => <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>)}
+                      <SelectItem value="all">كل الثلاجات</SelectItem>
+                      {warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import {
   Plus, Edit, Trash2, Snowflake, Thermometer, Wind,
-  Camera, Bell, Search, LayoutGrid, List, Package, X,
+  Bell, Search, LayoutGrid, List, Package, X, Tag, Loader2,
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -13,6 +13,8 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Pagination, usePagination } from "../components/ui/Pagination";
 import { useConfirmDelete } from "../components/ui/ConfirmDialog";
+import { SafeImage } from "../components/ui/SafeImage";
+import { ImageUploader } from "../components/ui/ImageUploader";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
 import { useTheme } from "../context/ThemeContext";
@@ -22,6 +24,10 @@ import {
   addPackage as apiAddPkg, editPackage as apiEditPkg, deletePackage as apiDeletePkg,
   type BackendItem, type BackendPackage,
 } from "../services/itemService";
+import {
+  getBrandsByItem, addBrand as apiAddBrand, editBrand as apiEditBrand, deleteBrand as apiDeleteBrand,
+  type BackendBrand,
+} from "../services/brandService";
 
 /* ─── view shapes ─── */
 type Item = {
@@ -32,6 +38,8 @@ type Item = {
   storageType: string;
   maxDays: number;
   alertDays: number;
+  tempMin?: number;
+  tempMax?: number;
   status: "active" | "inactive";
   image: string;
 };
@@ -55,6 +63,8 @@ const itemFromBackend = (i: BackendItem): Item => ({
   storageType: i.storageType,
   maxDays: i.shelfLifeDays ?? 0,
   alertDays: i.alertDaysBeforeExpiry ?? 0,
+  tempMin: i.temperatureMin ?? undefined,
+  tempMax: i.temperatureMax ?? undefined,
   status: i.isActive ? "active" : "inactive",
   image: i.imageUrl ?? "",
 });
@@ -90,47 +100,11 @@ const pkgGrads: Record<string, string> = {
 const anim = { hidden: { opacity: 0, y: 14 }, show: { opacity: 1, y: 0 } };
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.05 } } };
 
-/* ══════════════════════════════════════════════════════════
-   ImageUploader
-══════════════════════════════════════════════════════════ */
-function ImageUploader({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
-  const ref = useRef<HTMLInputElement>(null);
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) onChange(URL.createObjectURL(file));
-  };
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <div
-        onClick={() => ref.current?.click()}
-        className="relative w-full h-28 rounded-xl border-2 border-dashed border-[#d1d5dc] bg-[#f9fafb] flex flex-col items-center justify-center cursor-pointer hover:border-[#155dfc] hover:bg-blue-50/30 transition-all group overflow-hidden"
-      >
-        {value ? (
-          <>
-            <img src={value} alt="preview" className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-              <Camera className="w-5 h-5 text-white" />
-              <span className="text-white text-xs">تغيير الصورة</span>
-            </div>
-          </>
-        ) : (
-          <>
-            <Camera className="w-7 h-7 text-gray-300 mb-1.5 group-hover:text-[#155dfc] transition-colors" />
-            <span className="text-xs text-gray-400 group-hover:text-[#155dfc] transition-colors">انقر لرفع صورة</span>
-            <span className="text-[10px] text-gray-300 mt-0.5">PNG · JPG · حتى 2 ميجا</span>
-          </>
-        )}
-        <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-      </div>
-    </div>
-  );
-}
 
 /* ══════════════════════════════════════════════════════════
    ItemCard
 ══════════════════════════════════════════════════════════ */
-function ItemCard({ it, onDelete, onEdit }: { it: Item; onDelete: (it: Item) => void; onEdit: (it: Item) => void }) {
+function ItemCard({ it, onDelete, onEdit, onBrands }: { it: Item; onDelete: (it: Item) => void; onEdit: (it: Item) => void; onBrands: (it: Item) => void }) {
   const cfg = storageConfig[it.storageType] ?? storageConfig["تبريد"];
   const Icon = cfg.icon;
   const alertDay = it.maxDays - it.alertDays;
@@ -138,11 +112,9 @@ function ItemCard({ it, onDelete, onEdit }: { it: Item; onDelete: (it: Item) => 
     <motion.div variants={anim} className="h-full">
       <Card className="border-0 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden h-full flex flex-col">
         {/* Image / Avatar */}
-        <div className={cn("relative h-36 flex-shrink-0 flex items-center justify-center", it.image ? "" : `bg-gradient-to-br ${cfg.grad}`)}>
-          {it.image
-            ? <img src={it.image} alt={it.name} className="w-full h-full object-cover" />
-            : <span className="text-white text-5xl font-black opacity-80 select-none">{it.prefix}</span>
-          }
+        <div className={cn("relative h-36 flex-shrink-0 flex items-center justify-center bg-gradient-to-br", cfg.grad)}>
+          <span className="text-white text-5xl font-black opacity-80 select-none">{it.prefix}</span>
+          <SafeImage src={it.image} alt={it.name} className="absolute inset-0 w-full h-full object-cover" />
           <div className="absolute top-2 right-2">
             <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border bg-white/90 backdrop-blur-sm", cfg.badge)}>
               <Icon className="w-3 h-3" />{it.storageType}
@@ -170,8 +142,23 @@ function ItemCard({ it, onDelete, onEdit }: { it: Item; onDelete: (it: Item) => 
               <span className="flex items-center gap-1"><Bell className="w-3 h-3" />تنبيه بعد</span>
               <span className="font-medium">{alertDay} يوم</span>
             </div>
+            {(it.tempMin != null || it.tempMax != null) && (
+              <div className="flex justify-between items-center text-blue-600">
+                <span className="flex items-center gap-1"><Thermometer className="w-3 h-3" />نطاق الحرارة</span>
+                <span className="font-medium font-mono">
+                  {it.tempMin != null ? `${it.tempMin}°` : "—"} ~ {it.tempMax != null ? `${it.tempMax}°` : "—"}م
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t">
+            <button
+              className="p-1.5 text-violet-600 hover:bg-violet-50 rounded-md transition-colors"
+              onClick={() => onBrands(it)}
+              title="ماركات الصنف"
+            >
+              <Tag className="w-3.5 h-3.5" />
+            </button>
             <button
               className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
               onClick={() => onEdit(it)}
@@ -196,16 +183,12 @@ function PackageCard({ pkg, onDelete, onEdit }: { pkg: Pkg; onDelete: (pkg: Pkg)
   return (
     <motion.div variants={anim} className="h-full">
       <Card className="border-0 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden h-full flex flex-col">
-        <div className={cn("relative h-36 flex-shrink-0 flex items-center justify-center", pkg.image ? "" : `bg-gradient-to-br ${grad}`)}>
-          {pkg.image
-            ? <img src={pkg.image} alt={pkg.type} className="w-full h-full object-cover" />
-            : (
-              <div className="flex flex-col items-center gap-1">
-                <Package className="w-10 h-10 text-white/80" />
-                <span className="text-white text-sm font-semibold opacity-80">{pkg.type}</span>
-              </div>
-            )
-          }
+        <div className={cn("relative h-36 flex-shrink-0 flex items-center justify-center bg-gradient-to-br", grad)}>
+          <div className="flex flex-col items-center gap-1">
+            <Package className="w-10 h-10 text-white/80" />
+            <span className="text-white text-sm font-semibold opacity-80">{pkg.type}</span>
+          </div>
+          <SafeImage src={pkg.image} alt={pkg.type} className="absolute inset-0 w-full h-full object-cover" />
           <div className="absolute top-2 right-2">
             <span className="font-mono text-[10px] bg-white/90 backdrop-blur-sm text-gray-700 px-2 py-0.5 rounded">
               {pkg.code}
@@ -296,14 +279,24 @@ export function Items() {
 
   /* Edit state — Items */
   const [editItem, setEditItem] = useState<Item | null>(null);
-  const [editItemForm, setEditItemForm] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
+  const [editItemForm, setEditItemForm] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
 
   /* Edit state — Packages */
   const [editPkg, setEditPkg] = useState<Pkg | null>(null);
   const [editPkgForm, setEditPkgForm] = useState({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
 
-  const [newItem, setNewItem] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
+  const [newItem, setNewItem] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
   const [newPkg,  setNewPkg]  = useState({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
+
+  /* Brands state */
+  const [brandsItem, setBrandsItem] = useState<Item | null>(null);
+  const [brands, setBrands] = useState<BackendBrand[]>([]);
+  const [brandsLoading, setBrandsLoading] = useState(false);
+  const [brandSearch, setBrandSearch] = useState("");
+  const [showAddBrand, setShowAddBrand] = useState(false);
+  const [newBrand, setNewBrand] = useState({ name: "", code: "", notes: "" });
+  const [editingBrand, setEditingBrand] = useState<BackendBrand | null>(null);
+  const [editBrandForm, setEditBrandForm] = useState({ name: "", code: "", notes: "" });
 
   const { confirmDelete, dialog: confirmDialog } = useConfirmDelete();
 
@@ -330,6 +323,8 @@ export function Items() {
       storageType: it.storageType,
       maxDays: String(it.maxDays),
       alertDays: String(it.alertDays),
+      tempMin: it.tempMin != null ? String(it.tempMin) : "",
+      tempMax: it.tempMax != null ? String(it.tempMax) : "",
       image: it.image ?? "",
     });
   };
@@ -364,6 +359,8 @@ export function Items() {
         storageType: editItemForm.storageType,
         shelfLifeDays: num(editItemForm.maxDays),
         alertDaysBeforeExpiry: num(editItemForm.alertDays),
+        temperatureMin: num(editItemForm.tempMin),
+        temperatureMax: num(editItemForm.tempMax),
         imageUrl: editItemForm.image || undefined,
         isActive: true,
       });
@@ -413,11 +410,13 @@ export function Items() {
         storageType: newItem.storageType,
         shelfLifeDays: num(newItem.maxDays) ?? 30,
         alertDaysBeforeExpiry: num(newItem.alertDays) ?? 3,
+        temperatureMin: num(newItem.tempMin),
+        temperatureMax: num(newItem.tempMax),
         imageUrl: newItem.image || undefined,
       });
       toast.success(`تم إضافة الصنف "${newItem.name}" بنجاح`);
       setShowAddItem(false);
-      setNewItem({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", image: "" });
+      setNewItem({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
       await reload();
     } catch (err: any) {
       toast.error(err?.message ?? "فشل الإضافة");
@@ -467,6 +466,70 @@ export function Items() {
       toast.error(err?.message ?? "فشل الحذف");
     }
   };
+
+  /* ── Brands handlers ── */
+  const loadBrands = async (itemId: string) => {
+    setBrandsLoading(true);
+    try {
+      setBrands(await getBrandsByItem(itemId));
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحميل الماركات");
+    } finally {
+      setBrandsLoading(false);
+    }
+  };
+
+  const openBrands = (it: Item) => {
+    setBrandsItem(it);
+    setBrandSearch("");
+    void loadBrands(it.id);
+  };
+
+  const handleSaveNewBrand = async () => {
+    if (!brandsItem) return;
+    if (!newBrand.name.trim()) { toast.error("يرجى إدخال اسم الماركة"); return; }
+    try {
+      await apiAddBrand({ itemId: brandsItem.id, name: newBrand.name.trim(), code: newBrand.code || undefined, notes: newBrand.notes || undefined });
+      toast.success(`تم إضافة ماركة "${newBrand.name}" بنجاح`);
+      setShowAddBrand(false);
+      setNewBrand({ name: "", code: "", notes: "" });
+      void loadBrands(brandsItem.id);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل إضافة الماركة");
+    }
+  };
+
+  const openEditBrand = (brand: BackendBrand) => {
+    setEditingBrand(brand);
+    setEditBrandForm({ name: brand.name, code: brand.code ?? "", notes: brand.notes ?? "" });
+  };
+
+  const handleSaveEditBrand = async () => {
+    if (!editingBrand || !brandsItem) return;
+    if (!editBrandForm.name.trim()) { toast.error("يرجى إدخال اسم الماركة"); return; }
+    try {
+      await apiEditBrand({ id: editingBrand.id, itemId: brandsItem.id, name: editBrandForm.name.trim(), code: editBrandForm.code || undefined, notes: editBrandForm.notes || undefined, isActive: true });
+      toast.success(`تم تحديث الماركة "${editBrandForm.name}" بنجاح`);
+      setEditingBrand(null);
+      void loadBrands(brandsItem.id);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحديث الماركة");
+    }
+  };
+
+  const handleDeleteBrand = async (brand: BackendBrand) => {
+    try {
+      await apiDeleteBrand(brand.id);
+      toast.success(`تم حذف ماركة "${brand.name}"`);
+      void loadBrands(brandsItem!.id);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حذف الماركة");
+    }
+  };
+
+  const filteredBrands = brands.filter(b =>
+    !brandSearch || b.name.includes(brandSearch) || (b.code ?? "").includes(brandSearch)
+  );
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
@@ -530,6 +593,7 @@ export function Items() {
                           key={it.id}
                           it={it}
                           onEdit={openEditItem}
+                          onBrands={openBrands}
                           onDelete={it => confirmDelete(it.name, () => { void handleDeleteItem(it); })}
                         />
                       ))}
@@ -583,10 +647,10 @@ export function Items() {
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2.5">
                                   {/* Thumbnail */}
-                                  {it.image
-                                    ? <img src={it.image} alt={it.name} className="w-9 h-9 rounded-lg object-cover border border-gray-100 flex-shrink-0" />
-                                    : <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-gradient-to-br text-white font-bold text-sm", cfg.grad)}>{it.prefix}</div>
-                                  }
+                                  <div className={cn("relative w-9 h-9 rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0 bg-gradient-to-br text-white font-bold text-sm", cfg.grad)}>
+                                    <span>{it.prefix}</span>
+                                    <SafeImage src={it.image} alt={it.name} className="absolute inset-0 w-full h-full object-cover" />
+                                  </div>
                                   <span className="font-medium text-gray-800">{it.name}</span>
                                 </div>
                               </td>
@@ -612,6 +676,13 @@ export function Items() {
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-1">
+                                  <button
+                                    className="p-1.5 text-violet-600 hover:bg-violet-50 rounded-md transition-colors"
+                                    onClick={() => openBrands(it)}
+                                    title="ماركات الصنف"
+                                  >
+                                    <Tag className="w-3.5 h-3.5" />
+                                  </button>
                                   <button
                                     className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                                     onClick={() => openEditItem(it)}
@@ -724,10 +795,10 @@ export function Items() {
                             <tr key={pkg.id} className={cn("border-b hover:bg-blue-50/20 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2.5">
-                                  {pkg.image
-                                    ? <img src={pkg.image} alt={pkg.type} className="w-9 h-9 rounded-lg object-cover border border-gray-100 flex-shrink-0" />
-                                    : <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-gradient-to-br", grad)}><Package className="w-4 h-4 text-white" /></div>
-                                  }
+                                  <div className={cn("relative w-9 h-9 rounded-lg overflow-hidden flex items-center justify-center flex-shrink-0 bg-gradient-to-br", grad)}>
+                                    <Package className="w-4 h-4 text-white" />
+                                    <SafeImage src={pkg.image} alt={pkg.type} className="absolute inset-0 w-full h-full object-cover" />
+                                  </div>
                                   <span className="font-medium text-gray-800">{pkg.type}</span>
                                 </div>
                               </td>
@@ -776,7 +847,7 @@ export function Items() {
         <DialogContent dir="rtl" className="max-w-lg bg-white">
           <DialogHeader><DialogTitle>إضافة صنف جديد</DialogTitle></DialogHeader>
           <div className="space-y-4 py-1">
-            <ImageUploader label="صورة الصنف" value={newItem.image} onChange={v => setNewItem({ ...newItem, image: v })} />
+            <ImageUploader label="صورة الصنف" folder="items" value={newItem.image} onChange={v => setNewItem({ ...newItem, image: v })} />
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <Label>حرف الكود <span className="text-red-500">*</span></Label>
@@ -824,6 +895,24 @@ export function Items() {
                 سيتم إرسال تنبيه بعد <strong>{Number(newItem.maxDays) - Number(newItem.alertDays)}</strong> يوم من تاريخ الإيداع
               </p>
             )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Thermometer className="w-3 h-3 text-blue-500" />درجة حرارة دنيا (°م)</Label>
+                <Input type="number" placeholder="-18" value={newItem.tempMin} onChange={e => setNewItem({ ...newItem, tempMin: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Thermometer className="w-3 h-3 text-red-500" />درجة حرارة قصوى (°م)</Label>
+                <Input type="number" placeholder="-15" value={newItem.tempMax} onChange={e => setNewItem({ ...newItem, tempMax: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+            </div>
+            {(newItem.tempMin || newItem.tempMax) && (
+              <p className="text-xs text-blue-600 flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-lg">
+                <Thermometer className="w-3 h-3 flex-shrink-0" />
+                نطاق درجة الحرارة المقبول: <strong>{newItem.tempMin || "—"}°م</strong> إلى <strong>{newItem.tempMax || "—"}°م</strong>
+              </p>
+            )}
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
             <Button onClick={handleSaveItem} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ</Button>
@@ -837,7 +926,7 @@ export function Items() {
         <DialogContent dir="rtl" className="max-w-lg bg-white">
           <DialogHeader><DialogTitle>تعديل الصنف: {editItem?.name}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-1">
-            <ImageUploader label="صورة الصنف" value={editItemForm.image} onChange={v => setEditItemForm({ ...editItemForm, image: v })} />
+            <ImageUploader label="صورة الصنف" folder="items" value={editItemForm.image} onChange={v => setEditItemForm({ ...editItemForm, image: v })} />
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <Label>حرف الكود</Label>
@@ -889,6 +978,26 @@ export function Items() {
                 سيتم إرسال تنبيه بعد <strong>{Number(editItemForm.maxDays) - Number(editItemForm.alertDays)}</strong> يوم من تاريخ الإيداع
               </p>
             )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Thermometer className="w-3 h-3 text-blue-500" />درجة حرارة دنيا (°م)</Label>
+                <Input type="number" placeholder="-18" value={editItemForm.tempMin}
+                  onChange={e => setEditItemForm({ ...editItemForm, tempMin: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Thermometer className="w-3 h-3 text-red-500" />درجة حرارة قصوى (°م)</Label>
+                <Input type="number" placeholder="-15" value={editItemForm.tempMax}
+                  onChange={e => setEditItemForm({ ...editItemForm, tempMax: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+            </div>
+            {(editItemForm.tempMin || editItemForm.tempMax) && (
+              <p className="text-xs text-blue-600 flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-lg">
+                <Thermometer className="w-3 h-3 flex-shrink-0" />
+                نطاق درجة الحرارة المقبول: <strong>{editItemForm.tempMin || "—"}°م</strong> إلى <strong>{editItemForm.tempMax || "—"}°م</strong>
+              </p>
+            )}
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
             <Button onClick={handleSaveEditItem} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ التعديلات</Button>
@@ -902,7 +1011,7 @@ export function Items() {
         <DialogContent dir="rtl" className="max-w-lg bg-white">
           <DialogHeader><DialogTitle>إضافة عبوة جديدة</DialogTitle></DialogHeader>
           <div className="space-y-4 py-1">
-            <ImageUploader label="صورة العبوة" value={newPkg.image} onChange={v => setNewPkg({ ...newPkg, image: v })} />
+            <ImageUploader label="صورة العبوة" folder="packages" value={newPkg.image} onChange={v => setNewPkg({ ...newPkg, image: v })} />
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>كود العبوة</Label>
@@ -950,12 +1059,200 @@ export function Items() {
         </DialogContent>
       </Dialog>
 
+      {/* ══════════════════ BRANDS DIALOG ══════════════════ */}
+      <Dialog open={!!brandsItem} onOpenChange={open => { if (!open) setBrandsItem(null); }}>
+        <DialogContent dir="rtl" className="max-w-2xl bg-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="w-4 h-4 text-violet-600" />
+              ماركات الصنف: {brandsItem?.name}
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Toolbar */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <Input
+                placeholder="بحث بالاسم أو الكود..."
+                className="pr-9 bg-white border-gray-200 h-8 text-sm"
+                value={brandSearch}
+                onChange={e => setBrandSearch(e.target.value)}
+                dir="rtl"
+              />
+            </div>
+            <Button
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700 text-white gap-1 h-8"
+              onClick={() => {
+                const prefix = brandsItem?.prefix || brandsItem?.code?.split("-")[0] || "";
+                const seq = String(brands.length + 1).padStart(3, "0");
+                const autoCode = prefix ? `${prefix}-BR-${seq}` : `BR-${seq}`;
+                setNewBrand({ name: "", code: autoCode, notes: "" });
+                setShowAddBrand(true);
+              }}
+            >
+              <Plus className="w-3.5 h-3.5" />إضافة ماركة
+            </Button>
+          </div>
+
+          {/* Brands table */}
+          <div className="border rounded-xl overflow-hidden">
+            {brandsLoading ? (
+              <div className="flex items-center justify-center py-10 text-gray-400">
+                <Loader2 className="w-5 h-5 animate-spin ml-2" />جاري التحميل...
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">#</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">اسم الماركة</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">الكود</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">ملاحظات</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredBrands.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-10 text-gray-400">
+                        <Tag className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                        <p>{brandSearch ? "لا توجد نتائج" : "لا توجد ماركات مضافة بعد"}</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredBrands.map((brand, idx) => (
+                      <tr key={brand.id} className={cn("border-b last:border-0 hover:bg-violet-50/20 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
+                        <td className="px-4 py-2.5 text-gray-400 text-xs">{idx + 1}</td>
+                        <td className="px-4 py-2.5 font-medium text-gray-800">{brand.name}</td>
+                        <td className="px-4 py-2.5">
+                          {brand.code ? (
+                            <span className="font-mono text-xs bg-gray-100 text-violet-700 px-2 py-0.5 rounded">{brand.code}</span>
+                          ) : (
+                            <span className="text-gray-300 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-500 text-xs">{brand.notes || "—"}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1">
+                            <button
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                              onClick={() => openEditBrand(brand)}
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                              onClick={() => confirmDelete(brand.name, () => { void handleDeleteBrand(brand); })}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <DialogFooter className="mt-1">
+            <Button variant="outline" onClick={() => setBrandsItem(null)}>إغلاق</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════ ADD BRAND DIALOG ══════════════════ */}
+      <Dialog open={showAddBrand} onOpenChange={setShowAddBrand}>
+        <DialogContent dir="rtl" className="max-w-md bg-white">
+          <DialogHeader><DialogTitle>إضافة ماركة جديدة</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label>اسم الماركة <span className="text-red-500">*</span></Label>
+              <Input
+                placeholder="مثال: ماركة النيل"
+                value={newBrand.name}
+                onChange={e => setNewBrand({ ...newBrand, name: e.target.value })}
+                dir="rtl"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>الكود</Label>
+              <Input
+                placeholder="مثال: BR-001"
+                value={newBrand.code}
+                onChange={e => setNewBrand({ ...newBrand, code: e.target.value })}
+                dir="rtl"
+                className="border border-[#d1d5dc] bg-[#f9fafb] font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Input
+                placeholder="ملاحظات اختيارية..."
+                value={newBrand.notes}
+                onChange={e => setNewBrand({ ...newBrand, notes: e.target.value })}
+                dir="rtl"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveNewBrand} className="bg-violet-600 hover:bg-violet-700 text-white">حفظ</Button>
+            <Button variant="outline" onClick={() => setShowAddBrand(false)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════ EDIT BRAND DIALOG ══════════════════ */}
+      <Dialog open={!!editingBrand} onOpenChange={open => { if (!open) setEditingBrand(null); }}>
+        <DialogContent dir="rtl" className="max-w-md bg-white">
+          <DialogHeader><DialogTitle>تعديل الماركة: {editingBrand?.name}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label>اسم الماركة <span className="text-red-500">*</span></Label>
+              <Input
+                value={editBrandForm.name}
+                onChange={e => setEditBrandForm({ ...editBrandForm, name: e.target.value })}
+                dir="rtl"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>الكود</Label>
+              <Input
+                value={editBrandForm.code}
+                onChange={e => setEditBrandForm({ ...editBrandForm, code: e.target.value })}
+                dir="rtl"
+                className="border border-[#d1d5dc] bg-[#f9fafb] font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Input
+                value={editBrandForm.notes}
+                onChange={e => setEditBrandForm({ ...editBrandForm, notes: e.target.value })}
+                dir="rtl"
+                className="border border-[#d1d5dc] bg-[#f9fafb]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveEditBrand} className="bg-violet-600 hover:bg-violet-700 text-white">حفظ التعديلات</Button>
+            <Button variant="outline" onClick={() => setEditingBrand(null)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ══════════════════ EDIT PACKAGE DIALOG ══════════════════ */}
       <Dialog open={!!editPkg} onOpenChange={() => setEditPkg(null)}>
         <DialogContent dir="rtl" className="max-w-lg bg-white">
           <DialogHeader><DialogTitle>تعديل العبوة: {editPkg?.type}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-1">
-            <ImageUploader label="صورة العبوة" value={editPkgForm.image} onChange={v => setEditPkgForm({ ...editPkgForm, image: v })} />
+            <ImageUploader label="صورة العبوة" folder="packages" value={editPkgForm.image} onChange={v => setEditPkgForm({ ...editPkgForm, image: v })} />
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>كود العبوة</Label>

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { QRCodeSVG } from "qrcode.react";
 import {
   Plus,
   Edit,
@@ -78,6 +79,8 @@ type WHView = {
   length: number;
   width: number;
   height: number;
+  temperature: number | null;
+  occupancyUnit: string;
   totalCapacity: number;
   occupied: number;
   capacityBox: number;
@@ -93,6 +96,7 @@ type CHView = {
   code: string;
   name: string;
   storageType: string;
+  occupancyUnit: string;
   temp: number;
   tempMin: number;
   tempMax: number;
@@ -124,6 +128,8 @@ const mapWH = (w: BackendWarehouse, chamberCount: number, occupied: number): WHV
   length: w.lengthM ?? 0,
   width: w.widthM ?? 0,
   height: w.heightM ?? 0,
+  temperature: w.temperature ?? null,
+  occupancyUnit: w.occupancyUnit || "طن",
   totalCapacity: w.totalCapacity ?? 0,
   occupied,
   capacityBox: w.capacityBox ?? 0,
@@ -139,6 +145,7 @@ const mapCH = (c: BackendChamber): CHView => ({
   code: c.code,
   name: c.arName || c.name,
   storageType: c.storageType,
+  occupancyUnit: c.occupancyUnit || "طن",
   temp: c.temperatureMin ?? 0,
   tempMin: c.temperatureMin ?? 0,
   tempMax: c.temperatureMax ?? 0,
@@ -161,6 +168,32 @@ const opStatusColors: Record<string, string> = {
   صيانة: "bg-orange-100 text-orange-700 border-orange-200",
   إيقاف: "bg-red-100 text-red-700 border-red-200",
 };
+const occupancyUnits = ["طن", "مساحة", "مربع", "شوال", "طرد", "كارتونة"] as const;
+
+const getWHCapacityForUnit = (wh: WHView, unit: string, whChambers: CHView[]): number => {
+  switch (unit) {
+    case "مساحة": return Math.round((wh.length || 0) * (wh.width || 0));
+    case "مربع": return whChambers.reduce((s, c) => s + (c.cells || 0), 0);
+    case "شوال": return wh.capacitySack;
+    case "طرد": return wh.capacityBox;
+    case "كارتونة": return wh.capacityCarton;
+    case "طن":
+    default: return wh.totalCapacity;
+  }
+};
+
+const getCHCapacityForUnit = (ch: CHView, unit: string): number => {
+  switch (unit) {
+    case "مساحة": return Math.round((ch.length || 0) * (ch.width || 0));
+    case "مربع": return ch.cells;
+    case "شوال": return ch.capacitySack;
+    case "طرد": return ch.capacityBox;
+    case "كارتونة": return ch.capacityCarton;
+    case "طن":
+    default: return ch.capacityWeight;
+  }
+};
+
 const storageTypeColors: Record<
   string,
   { badge: string; header: string }
@@ -189,6 +222,8 @@ const defaultWH = {
   name: "",
   storageType: "",
   operationStatus: "تشغيل",
+  occupancyUnit: "طن",
+  temperature: "",
   length: "",
   width: "",
   height: "",
@@ -204,6 +239,7 @@ const defaultWH = {
 };
 const defaultCH = {
   storageType: "",
+  occupancyUnit: "طن",
   temp: "",
   tempMin: "",
   tempMax: "",
@@ -251,6 +287,8 @@ export function Warehouses() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showAddWH, setShowAddWH] = useState(false);
   const [showAddCH, setShowAddCH] = useState<string | null>(null);
+  const [qrWarehouse, setQrWarehouse] = useState<WHView | null>(null);
+  const qrSvgRef = useRef<SVGSVGElement>(null);
   const [newWH, setNewWH] = useState({ ...defaultWH });
   const [newCH, setNewCH] = useState({ ...defaultCH });
   const [view, setView] = useState<"grid" | "list">("list");
@@ -268,6 +306,8 @@ export function Warehouses() {
       name: wh.name,
       storageType: wh.storageType,
       operationStatus: wh.machineStatus,
+      occupancyUnit: wh.occupancyUnit || "طن",
+      temperature: wh.temperature == null ? "" : String(wh.temperature),
       length: String(wh.length ?? ""),
       width: String(wh.width ?? ""),
       height: String(wh.height ?? ""),
@@ -284,11 +324,38 @@ export function Warehouses() {
   };
 
   const num = (v: string) => v === "" || v == null ? undefined : Number(v);
+  const isPositiveTemp = (v: string) => {
+    const n = num(v);
+    return n !== undefined && Number.isFinite(n) && n > 0;
+  };
+  const sanitizeTemp = (raw: string): string => {
+    if (raw === "" || raw === "-") return raw;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return raw;
+    if (n > 0) {
+      toast.warning("درجة الحرارة يجب أن تكون سالبة - تم تحويلها تلقائياً");
+      return String(-n);
+    }
+    return raw;
+  };
+
+  const getUsedChamberWeight = (warehouseId: string, excludeChamberId?: string) =>
+    chambers
+      .filter(c => c.warehouseId === warehouseId && c.id !== excludeChamberId)
+      .reduce((sum, c) => sum + (c.capacityWeight ?? 0), 0);
+
+  const addCHWh = showAddCH ? warehouses.find(w => w.id === showAddCH) ?? null : null;
+  const addCHHasTotal = !!addCHWh && addCHWh.totalCapacity > 0;
+  const addCHRemainingW = addCHHasTotal ? Math.max(0, addCHWh!.totalCapacity - getUsedChamberWeight(addCHWh!.id)) : Number.POSITIVE_INFINITY;
 
   const handleSaveEditWH = async () => {
     if (!editWH) return;
     if (!editWHForm.letter || !editWHForm.name) {
       toast.error("يرجى إدخال حرف الثلاجة والاسم");
+      return;
+    }
+    if (isPositiveTemp(editWHForm.temperature)) {
+      toast.error("درجة حرارة الثلاجة يجب أن تكون سالبة أو صفر");
       return;
     }
     try {
@@ -299,6 +366,8 @@ export function Warehouses() {
         arName: editWHForm.name,
         storageType: editWHForm.storageType,
         operationStatus: editWHForm.operationStatus,
+        occupancyUnit: editWHForm.occupancyUnit || "طن",
+        temperature: num(editWHForm.temperature),
         lengthM: num(editWHForm.length),
         widthM: num(editWHForm.width),
         heightM: num(editWHForm.height),
@@ -329,6 +398,10 @@ export function Warehouses() {
       toast.error("يرجى إدخال حرف الثلاجة والاسم");
       return;
     }
+    if (isPositiveTemp(newWH.temperature)) {
+      toast.error("درجة حرارة الثلاجة يجب أن تكون سالبة أو صفر");
+      return;
+    }
     try {
       await apiAddWarehouse({
         code: `F-${newWH.letter}`,
@@ -336,6 +409,8 @@ export function Warehouses() {
         arName: newWH.name,
         storageType: newWH.storageType || "تبريد",
         operationStatus: newWH.operationStatus || "تشغيل",
+        occupancyUnit: newWH.occupancyUnit || "طن",
+        temperature: num(newWH.temperature),
         lengthM: num(newWH.length),
         widthM: num(newWH.width),
         heightM: num(newWH.height),
@@ -363,15 +438,25 @@ export function Warehouses() {
     if (!wh) return;
     const nextNum = chambers.filter(c => c.warehouseId === showAddCH).length + 1;
     const code = `${wh.letter}-${nextNum}`;
+    if (isPositiveTemp(newCH.temp) || isPositiveTemp(newCH.tempMin) || isPositiveTemp(newCH.tempMax)) {
+      toast.error("درجة حرارة مربع التبريد يجب أن تكون سالبة أو صفر");
+      return;
+    }
+    const newWeight = num(newCH.capacityWeight) ?? 0;
+    if (newWeight > addCHRemainingW) {
+      toast.error(`السعة بالوزن تتجاوز المتاح في الثلاجة (المتاح: ${addCHRemainingW} طن)`);
+      return;
+    }
     const tMin = newCH.tempMin !== "" ? num(newCH.tempMin) : num(newCH.temp);
     const tMax = newCH.tempMax !== "" ? num(newCH.tempMax) : num(newCH.temp);
     try {
       await apiAddChamber({
         warehouseId: showAddCH,
         code,
-        name: `عنبر ${code}`,
-        arName: `عنبر ${code}`,
+        name: `مربع تبريد ${code}`,
+        arName: `مربع تبريد ${code}`,
         storageType: newCH.storageType || wh.storageType || "تبريد",
+        occupancyUnit: newCH.occupancyUnit || "طن",
         temperatureMin: tMin,
         temperatureMax: tMax,
         capacity: num(newCH.cells),
@@ -386,12 +471,12 @@ export function Warehouses() {
         capacityCarton: num(newCH.capacityCarton),
         notes: newCH.notes,
       });
-      toast.success("تم إضافة العنبر بنجاح");
+      toast.success("تم إضافة مربع التبريد بنجاح");
       setShowAddCH(null);
       setNewCH({ ...defaultCH });
       await reload();
     } catch (err: any) {
-      toast.error(err?.message ?? "فشل إضافة العنبر");
+      toast.error(err?.message ?? "فشل إضافة مربع التبريد");
     }
   };
 
@@ -399,10 +484,17 @@ export function Warehouses() {
   const [editCH, setEditCH] = useState<CHView | null>(null);
   const [editCHForm, setEditCHForm] = useState({ ...defaultCH });
 
+  const editCHWh = editCH ? warehouses.find(w => w.id === editCH.warehouseId) ?? null : null;
+  const editCHHasTotal = !!editCHWh && editCHWh.totalCapacity > 0;
+  const editCHRemainingW = editCHHasTotal && editCH
+    ? Math.max(0, editCHWh!.totalCapacity - getUsedChamberWeight(editCHWh!.id, editCH.id))
+    : Number.POSITIVE_INFINITY;
+
   const openEditCH = (ch: CHView) => {
     setEditCH(ch);
     setEditCHForm({
       storageType: ch.storageType,
+      occupancyUnit: ch.occupancyUnit || "طن",
       temp: String(ch.tempMin ?? ""),
       tempMin: String(ch.tempMin ?? ""),
       tempMax: String(ch.tempMax ?? ""),
@@ -422,6 +514,15 @@ export function Warehouses() {
 
   const handleSaveEditCH = async () => {
     if (!editCH) return;
+    if (isPositiveTemp(editCHForm.tempMin) || isPositiveTemp(editCHForm.tempMax)) {
+      toast.error("درجة حرارة مربع التبريد يجب أن تكون سالبة أو صفر");
+      return;
+    }
+    const editWeight = num(editCHForm.capacityWeight) ?? 0;
+    if (editWeight > editCHRemainingW) {
+      toast.error(`السعة بالوزن تتجاوز المتاح في الثلاجة (المتاح: ${editCHRemainingW} طن)`);
+      return;
+    }
     try {
       await apiEditChamber({
         id: editCH.id,
@@ -429,6 +530,7 @@ export function Warehouses() {
         name: editCH.name || editCH.code,
         arName: editCH.name || editCH.code,
         storageType: editCHForm.storageType || editCH.storageType,
+        occupancyUnit: editCHForm.occupancyUnit || "طن",
         temperatureMin: num(editCHForm.tempMin),
         temperatureMax: num(editCHForm.tempMax),
         capacity: num(editCHForm.cells),
@@ -444,11 +546,11 @@ export function Warehouses() {
         notes: editCHForm.notes,
         isActive: true,
       });
-      toast.success(`تم تحديث العنبر "${editCH.code}" بنجاح`);
+      toast.success(`تم تحديث مربع التبريد "${editCH.code}" بنجاح`);
       setEditCH(null);
       await reload();
     } catch (err: any) {
-      toast.error(err?.message ?? "فشل تحديث العنبر");
+      toast.error(err?.message ?? "فشل تحديث مربع التبريد");
     }
   };
 
@@ -466,10 +568,10 @@ export function Warehouses() {
   const handleDeleteCH = async (ch: CHView) => {
     try {
       await apiDeleteChamber(ch.id);
-      toast.success(`تم حذف العنبر "${ch.code}" بنجاح`);
+      toast.success(`تم حذف مربع التبريد "${ch.code}" بنجاح`);
       await reload();
     } catch (err: any) {
-      toast.error(err?.message ?? "فشل حذف العنبر");
+      toast.error(err?.message ?? "فشل حذف مربع التبريد");
     }
   };
 
@@ -594,6 +696,7 @@ export function Warehouses() {
                           </div>
                           <div className="space-y-1.5 text-xs text-gray-500 border-t pt-3">
                             <p>{wh.storageType}</p>
+                            <p>وحدة الإشغال: {wh.occupancyUnit}</p>
                             <p>{wh.machineType}</p>
                             <p className="text-green-600 font-medium">{wh.dailyRent} ج.م/يوم</p>
                           </div>
@@ -616,12 +719,12 @@ export function Warehouses() {
                               ) : (
                                 <Plus className="w-3.5 h-3.5" />
                               )}
-                              عنابر ({wh.chambers})
+                              مربعات تبريد ({wh.chambers})
                             </button>
                             <button
                               className="flex items-center gap-1 text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded transition-colors"
                               onClick={() =>
-                                confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
+                                confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع مربعات تبريدها نهائياً.` })
                               }
                             >
                               <Trash2 className="w-3.5 h-3.5" />حذف
@@ -647,7 +750,7 @@ export function Warehouses() {
                 }}
               >
                 <span>الثلاجة</span>
-                <span>العنابر</span>
+                <span>مربعات التبريد</span>
                 <span>نوع التخزين</span>
                 <span>نسبة الإشغال</span>
                 <span>الماكينة</span>
@@ -660,13 +763,14 @@ export function Warehouses() {
             {/* Rows */}
             <div className="divide-y divide-gray-100">
               {filtered.map((wh, idx) => {
-              const pct = Math.round(
-                (wh.occupied / wh.totalCapacity) * 100,
-              );
               const isExpanded = expanded === wh.id;
               const wChambers = chambers.filter(
                 (c) => c.warehouseId === wh.id,
               );
+              const whCapacityForUnit = getWHCapacityForUnit(wh, wh.occupancyUnit, wChambers);
+              const pct = whCapacityForUnit > 0
+                ? Math.round((wh.occupied / whCapacityForUnit) * 100)
+                : 0;
               const stColors =
                 storageTypeColors[wh.storageType] ??
                 storageTypeColors["تبريد"];
@@ -716,26 +820,31 @@ export function Warehouses() {
                         {wh.chambers}
                       </span>
 
-                      {/* Storage type */}
-                      <Badge
-                        className={cn(
-                          "text-xs border-0 w-fit gap-1",
-                          stColors.badge,
-                        )}
-                      >
-                        {wh.storageType === "تجميد" ? (
-                          <Snowflake className="w-3 h-3" />
-                        ) : (
-                          <Thermometer className="w-3 h-3" />
-                        )}
-                        {wh.storageType}
-                      </Badge>
+                      {/* Storage type + occupancy unit */}
+                      <div className="flex flex-col gap-1 w-fit">
+                        <Badge
+                          className={cn(
+                            "text-xs border-0 w-fit gap-1",
+                            stColors.badge,
+                          )}
+                        >
+                          {wh.storageType === "تجميد" ? (
+                            <Snowflake className="w-3 h-3" />
+                          ) : (
+                            <Thermometer className="w-3 h-3" />
+                          )}
+                          {wh.storageType}
+                        </Badge>
+                        <Badge className="text-[10px] border-0 w-fit bg-gray-100 text-gray-600">
+                          وحدة: {wh.occupancyUnit}
+                        </Badge>
+                      </div>
 
                       {/* Occupancy */}
                       <div className="space-y-1 pl-2">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <span>
-                            {wh.occupied}/{wh.totalCapacity} طن
+                            {wh.occupied}/{whCapacityForUnit} {wh.occupancyUnit}
                           </span>
                           <span
                             className={cn(
@@ -811,7 +920,7 @@ export function Warehouses() {
                         <button
                           className="p-1.5 rounded hover:bg-gray-100 text-gray-500 transition-colors"
                           onClick={() => toggleExpand(wh.id)}
-                          title="عرض العنابر"
+                          title="عرض مربعات التبريد"
                         >
                           {isExpanded ? (
                             <ChevronUp className="w-3.5 h-3.5" />
@@ -822,6 +931,7 @@ export function Warehouses() {
                         <button
                           className="p-1.5 rounded hover:bg-gray-100 text-gray-500 transition-colors"
                           title="QR"
+                          onClick={() => setQrWarehouse(wh)}
                         >
                           <QrCode className="w-3.5 h-3.5" />
                         </button>
@@ -829,7 +939,7 @@ export function Warehouses() {
                           className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"
                           title="حذف الثلاجة"
                           onClick={() =>
-                            confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع عنابرها نهائياً.` })
+                            confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع مربعات تبريدها نهائياً.` })
                           }
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -854,10 +964,10 @@ export function Warehouses() {
                           <div className="flex items-center gap-2">
                             <MapPin className="w-4 h-4 text-blue-600" />
                             <span className="text-sm font-semibold text-blue-800">
-                              عنابر ثلاجة {wh.letter}
+                              مربعات تبريد ثلاجة {wh.letter}
                             </span>
                             <Badge className="bg-blue-100 text-blue-700 border-0 text-xs">
-                              {wChambers.length} عنبر
+                              {wChambers.length} مربع تبريد
                             </Badge>
                           </div>
                           <Button
@@ -866,16 +976,17 @@ export function Warehouses() {
                             onClick={() => setShowAddCH(wh.id)}
                           >
                             <Plus className="w-3 h-3" />
-                            إضافة عنبر
+                            إضافة مربع تبريد
                           </Button>
                         </div>
 
                         {wChambers.length > 0 ? (
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                             {wChambers.map((ch) => {
-                              const chPct = Math.round(
-                                (ch.occupied / ch.cells) * 100,
-                              );
+                              const chCapacityForUnit = getCHCapacityForUnit(ch, ch.occupancyUnit);
+                              const chPct = chCapacityForUnit > 0
+                                ? Math.round((ch.occupied / chCapacityForUnit) * 100)
+                                : 0;
                               const chColors =
                                 storageTypeColors[
                                   ch.storageType
@@ -899,6 +1010,9 @@ export function Warehouses() {
                                       <Badge className="bg-white/20 text-white border-0 text-xs">
                                         {ch.storageType}
                                       </Badge>
+                                      <Badge className="bg-white/20 text-white border-0 text-[10px]">
+                                        {ch.occupancyUnit}
+                                      </Badge>
                                     </div>
                                     <div className="flex items-center gap-2">
                                       <span className="text-white/80 text-xs font-medium">
@@ -907,16 +1021,16 @@ export function Warehouses() {
                                       <button
                                         onClick={() => openEditCH(ch)}
                                         className="p-1 rounded bg-white/10 hover:bg-white/25 text-white/80 hover:text-white transition-colors"
-                                        title="تعديل العنبر"
+                                        title="تعديل مربع التبريد"
                                       >
                                         <Edit className="w-3 h-3" />
                                       </button>
                                       <button
                                         onClick={() =>
-                                          confirmDelete(ch.code, () => { void handleDeleteCH(ch); }, { title: "حذف العنبر", description: `سيتم حذف العنبر "${ch.code}" نهائياً.` })
+                                          confirmDelete(ch.code, () => { void handleDeleteCH(ch); }, { title: "حذف مربع التبريد", description: `سيتم حذف مربع التبريد "${ch.code}" نهائياً.` })
                                         }
                                         className="p-1 rounded bg-white/10 hover:bg-white/25 text-white/80 hover:text-white transition-colors"
-                                        title="حذف العنبر"
+                                        title="حذف مربع التبريد"
                                       >
                                         <Trash2 className="w-3 h-3" />
                                       </button>
@@ -1003,7 +1117,7 @@ export function Warehouses() {
                                       <div className="flex justify-between text-xs text-gray-500 mb-1">
                                         <span>
                                           {ch.occupied}/
-                                          {ch.cells} مشغول
+                                          {chCapacityForUnit} {ch.occupancyUnit}
                                         </span>
                                         <span
                                           className={cn(
@@ -1037,8 +1151,8 @@ export function Warehouses() {
                           </div>
                         ) : (
                           <p className="text-sm text-gray-500 text-center py-6">
-                            لا توجد عنابر — اضغط "إضافة عنبر"
-                            لإضافة أول عنبر
+                            لا توجد مربعات تبريد — اضغط "إضافة مربع تبريد"
+                            لإضافة أول مربع تبريد
                           </p>
                         )}
                       </motion.div>
@@ -1166,6 +1280,7 @@ export function Warehouses() {
                 <div className="space-y-1.5">
                   <Label>نوع التخزين</Label>
                   <Select
+                    value={newWH.storageType}
                     onValueChange={(v) =>
                       setNewWH({ ...newWH, storageType: v })
                     }
@@ -1179,6 +1294,40 @@ export function Warehouses() {
                     <SelectContent dir="rtl">
                       <SelectItem value="تجميد">تجميد</SelectItem>
                       <SelectItem value="تبريد">تبريد</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>درجة الحرارة (°م)</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    dir="rtl"
+                    className="border border-[#d1d5dc] bg-[#f9fafb]"
+                    value={newWH.temperature}
+                    onChange={(e) =>
+                      setNewWH({
+                        ...newWH,
+                        temperature: sanitizeTemp(e.target.value),
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>وحدة الإشغال</Label>
+                  <Select
+                    value={newWH.occupancyUnit}
+                    onValueChange={(v) => setNewWH({ ...newWH, occupancyUnit: v })}
+                  >
+                    <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent dir="rtl">
+                      {occupancyUnits.map((u) => (
+                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1455,7 +1604,7 @@ export function Warehouses() {
       </Dialog>
 
       {/* ══════════════════════════════════════════════════════════════
-          Dialog: إضافة عنبر
+          Dialog: إضافة مربع تبريد
       ══════════════════════════════════════════════════════════════ */}
       <Dialog
         open={showAddCH !== null}
@@ -1467,7 +1616,7 @@ export function Warehouses() {
         >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              إضافة عنبر جديد
+              إضافة مربع تبريد جديد
               {showAddCH &&
                 (() => {
                   const wh = warehouses.find(
@@ -1514,7 +1663,7 @@ export function Warehouses() {
                   className="border border-gray-300"
                   value={newCH.tempMin}
                   onChange={(e) =>
-                    setNewCH({ ...newCH, tempMin: e.target.value })
+                    setNewCH({ ...newCH, tempMin: sanitizeTemp(e.target.value) })
                   }
                 />
               </div>
@@ -1529,7 +1678,7 @@ export function Warehouses() {
                   className="border border-gray-300"
                   value={newCH.tempMax}
                   onChange={(e) =>
-                    setNewCH({ ...newCH, tempMax: e.target.value })
+                    setNewCH({ ...newCH, tempMax: sanitizeTemp(e.target.value) })
                   }
                 />
               </div>
@@ -1558,6 +1707,24 @@ export function Warehouses() {
                     }
                   />
                 </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>وحدة الإشغال</Label>
+                <Select
+                  value={newCH.occupancyUnit}
+                  onValueChange={(v) => setNewCH({ ...newCH, occupancyUnit: v })}
+                >
+                  <SelectTrigger dir="rtl" className="border border-gray-300 bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {occupancyUnits.map((u) => (
+                      <SelectItem key={u} value={u}>{u}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -1644,13 +1811,27 @@ export function Warehouses() {
                   dir="rtl"
                   className="border border-gray-300"
                   value={newCH.capacityWeight}
-                  onChange={(e) =>
-                    setNewCH({
-                      ...newCH,
-                      capacityWeight: e.target.value,
-                    })
-                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const n = num(v);
+                    if (n !== undefined && n > addCHRemainingW) {
+                      toast.warning(`المتاح في الثلاجة ${addCHRemainingW} طن فقط`);
+                    }
+                    setNewCH({ ...newCH, capacityWeight: v });
+                  }}
                 />
+                {addCHHasTotal && (
+                  <p
+                    className={cn(
+                      "text-xs",
+                      (num(newCH.capacityWeight) ?? 0) > addCHRemainingW
+                        ? "text-red-600 font-medium"
+                        : "text-gray-500",
+                    )}
+                  >
+                    المتاح في الثلاجة: {addCHRemainingW} طن
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1732,7 +1913,7 @@ export function Warehouses() {
               onClick={handleAddCH}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
-              حفظ العنبر
+              حفظ مربع التبريد
             </Button>
             <Button
               variant="outline"
@@ -1751,7 +1932,7 @@ export function Warehouses() {
         <DialogContent dir="rtl" className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              تعديل العنبر
+              تعديل مربع التبريد
               {editCH && (
                 <Badge className="bg-blue-100 text-blue-700 border-0 mr-1">
                   {editCH.code}
@@ -1778,7 +1959,7 @@ export function Warehouses() {
                 <Label>درجة الحرارة الدنيا (°م)</Label>
                 <Input type="number" dir="rtl" className="border border-gray-300"
                   value={editCHForm.tempMin}
-                  onChange={e => setEditCHForm({ ...editCHForm, tempMin: e.target.value })} />
+                  onChange={e => setEditCHForm({ ...editCHForm, tempMin: sanitizeTemp(e.target.value) })} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -1786,7 +1967,7 @@ export function Warehouses() {
                 <Label>درجة الحرارة العليا (°م)</Label>
                 <Input type="number" dir="rtl" className="border border-gray-300"
                   value={editCHForm.tempMax}
-                  onChange={e => setEditCHForm({ ...editCHForm, tempMax: e.target.value })} />
+                  onChange={e => setEditCHForm({ ...editCHForm, tempMax: sanitizeTemp(e.target.value) })} />
               </div>
               <div className="space-y-1.5">
                 <Label>الصفوف × الأعمدة</Label>
@@ -1799,6 +1980,21 @@ export function Warehouses() {
                     value={editCHForm.columnsCount}
                     onChange={e => setEditCHForm({ ...editCHForm, columnsCount: e.target.value })} />
                 </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>وحدة الإشغال</Label>
+                <Select value={editCHForm.occupancyUnit} onValueChange={v => setEditCHForm({ ...editCHForm, occupancyUnit: v })}>
+                  <SelectTrigger dir="rtl" className="border border-gray-300 bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {occupancyUnits.map((u) => (
+                      <SelectItem key={u} value={u}>{u}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -1837,7 +2033,26 @@ export function Warehouses() {
                 <Label>السعة بالوزن (طن)</Label>
                 <Input type="number" dir="rtl" className="border border-gray-300"
                   value={editCHForm.capacityWeight}
-                  onChange={e => setEditCHForm({ ...editCHForm, capacityWeight: e.target.value })} />
+                  onChange={e => {
+                    const v = e.target.value;
+                    const n = num(v);
+                    if (n !== undefined && n > editCHRemainingW) {
+                      toast.warning(`المتاح في الثلاجة ${editCHRemainingW} طن فقط`);
+                    }
+                    setEditCHForm({ ...editCHForm, capacityWeight: v });
+                  }} />
+                {editCHHasTotal && (
+                  <p
+                    className={cn(
+                      "text-xs",
+                      (num(editCHForm.capacityWeight) ?? 0) > editCHRemainingW
+                        ? "text-red-600 font-medium"
+                        : "text-gray-500",
+                    )}
+                  >
+                    المتاح في الثلاجة: {editCHRemainingW} طن
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1971,6 +2186,35 @@ export function Warehouses() {
                   </Select>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>درجة الحرارة (°م)</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    dir="rtl"
+                    className="border border-[#d1d5dc] bg-[#f9fafb]"
+                    value={editWHForm.temperature}
+                    onChange={(e) => setEditWHForm({ ...editWHForm, temperature: sanitizeTemp(e.target.value) })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>وحدة الإشغال</Label>
+                  <Select
+                    value={editWHForm.occupancyUnit}
+                    onValueChange={(v) => setEditWHForm({ ...editWHForm, occupancyUnit: v })}
+                  >
+                    <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent dir="rtl">
+                      {occupancyUnits.map((u) => (
+                        <SelectItem key={u} value={u}>{u}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </TabsContent>
 
             {/* ── Tab 2: Capacity ── */}
@@ -2064,6 +2308,117 @@ export function Warehouses() {
             <Button variant="outline" onClick={() => setEditWH(null)}>
               إلغاء
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Warehouse QR Code Dialog ── */}
+      <Dialog open={!!qrWarehouse} onOpenChange={(o) => { if (!o) setQrWarehouse(null); }}>
+        <DialogContent dir="rtl" className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <QrCode className="w-4 h-4 text-blue-600" />
+              QR للثلاجة {qrWarehouse?.letter}
+            </DialogTitle>
+          </DialogHeader>
+          {qrWarehouse && (() => {
+            const whChambers = chambers.filter(c => c.warehouseId === qrWarehouse.id);
+            const payload = {
+              type: "warehouse",
+              code: qrWarehouse.code,
+              letter: qrWarehouse.letter,
+              name: qrWarehouse.name,
+              storageType: qrWarehouse.storageType,
+              status: qrWarehouse.machineStatus,
+              occupancyUnit: qrWarehouse.occupancyUnit,
+              totalCapacity: qrWarehouse.totalCapacity,
+              occupied: qrWarehouse.occupied,
+              dimensions: { length: qrWarehouse.length, width: qrWarehouse.width, height: qrWarehouse.height },
+              machineType: qrWarehouse.machineType,
+              chambersCount: whChambers.length,
+              chambers: whChambers.map(c => ({
+                code: c.code,
+                name: c.name,
+                storageType: c.storageType,
+                occupancyUnit: c.occupancyUnit,
+                tempMin: c.tempMin,
+                tempMax: c.tempMax,
+                cells: c.cells,
+                occupied: c.occupied,
+                capacityWeightTon: c.capacityWeight,
+              })),
+            };
+            const qrText = JSON.stringify(payload);
+            return (
+              <div className="space-y-3">
+                <div className="flex justify-center bg-white p-4 rounded-xl border border-gray-100">
+                  <QRCodeSVG
+                    ref={qrSvgRef}
+                    value={qrText}
+                    size={224}
+                    level="M"
+                    includeMargin
+                  />
+                </div>
+                <div className="text-xs space-y-1 text-gray-700 bg-gray-50 rounded-lg p-3 border border-gray-100">
+                  <div className="flex justify-between"><span className="text-gray-500">الاسم:</span><span>{qrWarehouse.name}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">الكود:</span><span className="font-mono">{qrWarehouse.code}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">نوع التخزين:</span><span>{qrWarehouse.storageType}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">الحالة:</span><span>{qrWarehouse.machineStatus}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">السعة:</span><span>{qrWarehouse.occupied}/{qrWarehouse.totalCapacity} {qrWarehouse.occupancyUnit}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">عدد مربعات التبريد:</span><span className="font-semibold">{whChambers.length}</span></div>
+                </div>
+                {whChambers.length > 0 && (
+                  <div className="text-xs space-y-1.5">
+                    <p className="text-gray-500 font-medium">مربعات التبريد</p>
+                    <div className="max-h-40 overflow-y-auto space-y-1">
+                      {whChambers.map(c => (
+                        <div key={c.id} className="flex items-center justify-between bg-blue-50/50 border border-blue-100 rounded px-2.5 py-1.5">
+                          <span className="font-mono text-blue-700">{c.code}</span>
+                          <span className="text-gray-600">{c.storageType} · {c.tempMin}/{c.tempMax}°م · {c.occupied}/{c.cells} {c.occupancyUnit}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter className="gap-2">
+            <Button
+              onClick={() => {
+                if (!qrWarehouse) return;
+                const svg = qrSvgRef.current;
+                if (!svg) return;
+                const data = new XMLSerializer().serializeToString(svg);
+                const blob = new Blob([data], { type: "image/svg+xml" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `qr-${qrWarehouse.code}.svg`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              تنزيل
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!qrWarehouse) return;
+                const svg = qrSvgRef.current;
+                if (!svg) return;
+                const w = window.open("", "_blank", "width=400,height=600");
+                if (!w) return;
+                const svgString = new XMLSerializer().serializeToString(svg);
+                w.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"/><title>QR ${qrWarehouse.code}</title><style>@page{size:A6;margin:10mm}body{font-family:"Noto Kufi Arabic",sans-serif;text-align:center;padding:12px}.code{font-family:monospace;color:#155dfc;font-size:14px;margin:8px 0}.name{font-size:18px;font-weight:600;margin-bottom:6px}.meta{font-size:12px;color:#555;margin-top:8px}</style></head><body><div class="name">${qrWarehouse.name}</div><div class="code">${qrWarehouse.code}</div>${svgString}<div class="meta">${qrWarehouse.storageType} — ${chambers.filter(c => c.warehouseId === qrWarehouse.id).length} مربع تبريد</div><script>window.onload=()=>{window.focus();window.print();}<\/script></body></html>`);
+                w.document.close();
+              }}
+            >
+              طباعة
+            </Button>
+            <Button variant="outline" onClick={() => setQrWarehouse(null)}>إغلاق</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

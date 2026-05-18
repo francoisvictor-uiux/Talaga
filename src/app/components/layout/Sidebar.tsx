@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from "react-router";
+﻿import { NavLink, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   LayoutDashboard, Warehouse, Package, Users, UserCheck,
@@ -13,7 +13,7 @@ import { useTheme } from "../../context/ThemeContext";
 
 const navItems = [
   { path: "/dashboard", label: "لوحة التحكم", icon: LayoutDashboard },
-  { path: "/warehouses", label: "المخازن والثلاجات", icon: Warehouse },
+  { path: "/warehouses", label: "الثلاجات", icon: Warehouse },
   { path: "/items", label: "الأصناف والعبوات", icon: Package },
   { path: "/customers", label: "العملاء", icon: Users },
   { path: "/employees", label: "الموظفون", icon: UserCheck },
@@ -59,7 +59,7 @@ export function Sidebar({ collapsed, onCollapse }: SidebarProps) {
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden whitespace-nowrap"
               >
-                <p className="text-sm font-semibold text-white leading-tight">نظام مخازن</p>
+                <p className="text-sm font-semibold text-white leading-tight">نظام ثلاجات</p>
                 <p className="text-xs leading-tight" style={{ color: theme.sidebarPrimary }}>التبريد</p>
               </motion.div>
             )}

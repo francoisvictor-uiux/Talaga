@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   Account, JournalEntry, CostCenter, Currency,
   Asset, BankAccount, Treasury,
 } from '../types/accounts'
@@ -70,7 +70,7 @@ export const CHART_OF_ACCOUNTS: Account[] = [
   // ══════════════════ 4 — الإيرادات ══════════════════
   { id: 'a4',    code: '4',    name: 'الإيرادات',             category: 'revenue', nature: 'credit', level: 1, parentId: null,  balance: 1_221_500, currency: 'EGP', isActive: true, allowPosting: false },
   { id: 'a41',   code: '41',   name: 'إيرادات المبيعات',      category: 'revenue', nature: 'credit', level: 2, parentId: 'a4',  balance: 1_206_500, currency: 'EGP', isActive: true, allowPosting: false },
-  { id: 'a4101', code: '4101', name: 'مبيعات بضائع مخزنة (رؤوس)',   category: 'revenue', nature: 'credit', level: 3, parentId: 'a41', balance: 780_000,   currency: 'EGP', isActive: true, allowPosting: true },
+  { id: 'a4101', code: '4101', name: 'مبيعات بضائع ثلاجةة (رؤوس)',   category: 'revenue', nature: 'credit', level: 3, parentId: 'a41', balance: 780_000,   currency: 'EGP', isActive: true, allowPosting: true },
   { id: 'a4102', code: '4102', name: 'مبيعات منتجات مبردة',   category: 'revenue', nature: 'credit', level: 3, parentId: 'a41', balance: 286_500,   currency: 'EGP', isActive: true, allowPosting: true },
   { id: 'a4103', code: '4103', name: 'مبيعات مواد تغليف فائضة',   category: 'revenue', nature: 'credit', level: 3, parentId: 'a41', balance: 75_000,    currency: 'EGP', isActive: true, allowPosting: true },
   { id: 'a4104', code: '4104', name: 'مبيعات منتجات ثانوية',  category: 'revenue', nature: 'credit', level: 3, parentId: 'a41', balance: 65_000,    currency: 'EGP', isActive: true, allowPosting: true },
@@ -83,7 +83,7 @@ export const CHART_OF_ACCOUNTS: Account[] = [
 
   // 51 — تكلفة البضاعة
   { id: 'a51',   code: '51',   name: 'تكلفة البضاعة المباعة', category: 'cogs',     nature: 'debit', level: 2, parentId: 'a5',  balance: 496_000,   currency: 'EGP', isActive: true, allowPosting: false },
-  { id: 'a5101', code: '5101', name: 'مشتريات بضائع مخزنة ومواد تغليف',  category: 'cogs',     nature: 'debit', level: 3, parentId: 'a51', balance: 496_000,   currency: 'EGP', isActive: true, allowPosting: true },
+  { id: 'a5101', code: '5101', name: 'مشتريات بضائع ثلاجةة ومواد تغليف',  category: 'cogs',     nature: 'debit', level: 3, parentId: 'a51', balance: 496_000,   currency: 'EGP', isActive: true, allowPosting: true },
 
   // 52 — رواتب وأجور
   { id: 'a52',   code: '52',   name: 'الرواتب والأجور',       category: 'expenses', nature: 'debit', level: 2, parentId: 'a5',  balance: 370_000,   currency: 'EGP', isActive: true, allowPosting: false },
@@ -102,7 +102,7 @@ export const CHART_OF_ACCOUNTS: Account[] = [
   // 54 — الصيانة
   { id: 'a54',   code: '54',   name: 'مصاريف الصيانة',        category: 'expenses', nature: 'debit', level: 2, parentId: 'a5',  balance: 36_000,    currency: 'EGP', isActive: true, allowPosting: false },
   { id: 'a5401', code: '5401', name: 'صيانة آلات ومعدات',      category: 'expenses', nature: 'debit', level: 3, parentId: 'a54', balance: 18_000,    currency: 'EGP', isActive: true, allowPosting: true },
-  { id: 'a5402', code: '5402', name: 'صيانة مباني وعنابر تبريد',    category: 'expenses', nature: 'debit', level: 3, parentId: 'a54', balance: 12_000,    currency: 'EGP', isActive: true, allowPosting: true },
+  { id: 'a5402', code: '5402', name: 'صيانة مباني ومربعات تبريد تبريد',    category: 'expenses', nature: 'debit', level: 3, parentId: 'a54', balance: 12_000,    currency: 'EGP', isActive: true, allowPosting: true },
   { id: 'a5403', code: '5403', name: 'صيانة سيارات',           category: 'expenses', nature: 'debit', level: 3, parentId: 'a54', balance: 6_000,     currency: 'EGP', isActive: true, allowPosting: true },
 
   // 55 — الإهلاك
@@ -142,7 +142,7 @@ export const CURRENCIES: Currency[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 export const ASSETS: Asset[] = [
   {
-    id: 'ast1', code: 'AST-001', name: 'مبنى العنابر تبريد الرئيسي', type: 'building',
+    id: 'ast1', code: 'AST-001', name: 'مبنى مربعات التبريد تبريد الرئيسي', type: 'building',
     purchaseDate: '2020-01-15', purchaseCost: 800_000, usefulLifeYears: 40,
     depreciationMethod: 'straight_line', residualValue: 100_000,
     accumulatedDepreciation: 87_500, bookValue: 712_500,
@@ -218,7 +218,7 @@ export const JOURNAL_ENTRIES: JournalEntry[] = [
   },
   {
     id: 'je002', number: 'JE-2026-002', date: '2026-01-10',
-    description: 'تحصيل مبيعات بضائع مخزنة — عميل ثلاجات النيل',
+    description: 'تحصيل مبيعات بضائع ثلاجةة — عميل ثلاجات النيل',
     type: 'collection', status: 'posted',
     customerId: 'cust1', supplierId: undefined, salesOrderId: 'SO-2026-001',
     lines: [
@@ -315,7 +315,7 @@ export const JOURNAL_ENTRIES: JournalEntry[] = [
   },
   {
     id: 'je010', number: 'JE-2026-010', date: '2026-03-10',
-    description: 'تحصيل مبيعات بضائع مخزنة — عميل ثلاجات النيل',
+    description: 'تحصيل مبيعات بضائع ثلاجةة — عميل ثلاجات النيل',
     type: 'collection', status: 'posted',
     customerId: 'cust1', salesOrderId: 'SO-2026-003',
     lines: [
@@ -351,12 +351,12 @@ export const JOURNAL_ENTRIES: JournalEntry[] = [
   },
   {
     id: 'je013', number: 'JE-2026-013', date: '2026-03-27',
-    description: 'تحصيل مبيعات بضائع مخزنة — عميل الفرسان',
+    description: 'تحصيل مبيعات بضائع ثلاجةة — عميل الفرسان',
     type: 'collection', status: 'posted',
     customerId: 'cust4', salesOrderId: 'SO-2026-004',
     lines: [
       { id: 'l31', accountId: 'a1201', accountCode: '1201', accountName: 'نقدية بالصندوق',   debit: 120_000, credit: 0, amount: 120_000, currency: 'EGP', exchangeRate: 1 },
-      { id: 'l32', accountId: 'a4101', accountCode: '4101', accountName: 'مبيعات بضائع مخزنة',      debit: 0, credit: 120_000, amount: 120_000, currency: 'EGP', exchangeRate: 1 },
+      { id: 'l32', accountId: 'a4101', accountCode: '4101', accountName: 'مبيعات بضائع ثلاجةة',      debit: 0, credit: 120_000, amount: 120_000, currency: 'EGP', exchangeRate: 1 },
     ],
     totalDebit: 120_000, totalCredit: 120_000, isBalanced: true,
     createdBy: 'محاسب', createdAt: '2026-03-27T12:00:00', postedAt: '2026-03-27T12:30:00',

@@ -80,4 +80,17 @@ function safeJson(text: string): any {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+export function resolveImageUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  if (
+    url.startsWith("data:") ||
+    url.startsWith("blob:") ||
+    url.startsWith("http://") ||
+    url.startsWith("https://")
+  ) {
+    return url;
+  }
+  return `${API_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 export { API_URL };

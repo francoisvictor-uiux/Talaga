@@ -7,7 +7,7 @@ import { Warehouses } from "./pages/Warehouses";
 import { Items } from "./pages/Items";
 import { Customers } from "./pages/Customers";
 import { Employees } from "./pages/Employees";
-import { Movements } from "./pages/Movements";
+import { Movements, MovementDetailPage, MovementEditPage } from "./pages/Movements";
 import { Inventory } from "./pages/Inventory";
 import { Reports } from "./pages/Reports";
 import { TodoList } from "./pages/TodoList";
@@ -39,6 +39,8 @@ export const router = createHashRouter([
           { path: "customers", Component: Customers },
           { path: "employees", Component: Employees },
           { path: "movements", Component: Movements },
+          { path: "movements/:id", Component: MovementDetailPage },
+          { path: "movements/:id/edit", Component: MovementEditPage },
           { path: "inventory", Component: Inventory },
           { path: "reports", Component: Reports },
           { path: "tasks", Component: TodoList },

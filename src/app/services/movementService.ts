@@ -50,6 +50,9 @@ export type BackendMovement = {
   toChamberId?: string | null;
   toChamberName?: string | null;
 
+  sourceMovementId?: string | null;
+  sourceMovementNumber?: string | null;
+
   quantity: number;
   netWeightKg?: number | null;
   unit?: string | null;
@@ -57,6 +60,17 @@ export type BackendMovement = {
   vehiclePlate?: string | null;
   referenceNumber?: string | null;
   notes?: string | null;
+  productionDate?: string | null;
+  expiryDate?: string | null;
+  naulagePerUnit?: number | null;
+  naulageUnit?: string | null;
+  openingFee?: number | null;
+  temperature?: number | null;
+  damagedQuantity?: number | null;
+  brandId?: string | null;
+  brandName?: string | null;
+  preCoolingFee?: number | null;
+  weightPerUnit?: number | null;
   isActive: boolean;
   creationDate: string;
 };
@@ -66,12 +80,14 @@ export type AddMovementPayload = {
   movementType: string;
   movementDate: string;
   customerId: string;
+  toCustomerId?: string;
   itemId: string;
   packageId?: string;
   fromWarehouseId?: string;
   fromChamberId?: string;
   toWarehouseId?: string;
   toChamberId?: string;
+  sourceMovementId?: string;
   quantity: number;
   netWeightKg?: number;
   unit?: string;
@@ -79,6 +95,17 @@ export type AddMovementPayload = {
   vehiclePlate?: string;
   referenceNumber?: string;
   notes?: string;
+  productionDate?: string;
+  expiryDate?: string;
+  naulagePerUnit?: number;
+  naulageUnit?: string;
+  openingFee?: number;
+  temperature?: number;
+  damagedQuantity?: number;
+  brandId?: string;
+  brandName?: string;
+  preCoolingFee?: number;
+  weightPerUnit?: number;
 };
 
 export type EditMovementPayload = AddMovementPayload & {
@@ -134,4 +161,34 @@ export async function editMovement(payload: EditMovementPayload): Promise<Backen
 
 export async function deactivateMovement(id: string): Promise<void> {
   await apiFetch<ServiceResult<boolean>>("/Movements/DeactivateMovement", { method: "DELETE", headers: { "X-Id": id } });
+}
+
+export type AvailableSource = {
+  movementId: string;
+  movementNumber: string;
+  movementType: string;
+  movementDate: string;
+  originalQuantity: number;
+  consumedQuantity: number;
+  remainingQuantity: number;
+  unit?: string | null;
+};
+
+export async function getAvailableSources(args: {
+  customerId: string;
+  itemId: string;
+  chamberId: string;
+  packageId?: string;
+  excludeMovementId?: string;
+}): Promise<AvailableSource[]> {
+  const p = new URLSearchParams({
+    customerId: args.customerId,
+    itemId: args.itemId,
+    chamberId: args.chamberId,
+  });
+  if (args.packageId) p.set("packageId", args.packageId);
+  if (args.excludeMovementId) p.set("excludeMovementId", args.excludeMovementId);
+  const res = await apiFetch<ServiceResult<AvailableSource[]>>(`/Movements/GetAvailableSources?${p.toString()}`);
+  if (!res.isSuccess) throw new Error(res.errorMessages?.[0] ?? "فشل تحميل الفواتير المتاحة");
+  return res.data ?? [];
 }

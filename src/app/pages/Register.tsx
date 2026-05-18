@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Eye, EyeOff, Snowflake, ArrowRight } from "lucide-react";
@@ -12,7 +12,7 @@ import { useAuth } from "../context/AuthContext";
 const ROLE_OPTIONS = [
   { value: "Admin", label: "مدير النظام" },
   { value: "Manager", label: "مدير" },
-  { value: "Warehouse", label: "مسؤول مخازن" },
+  { value: "Warehouse", label: "مسؤول ثلاجات" },
   { value: "Accountant", label: "محاسب" },
   { value: "Viewer", label: "مشاهدة فقط" },
 ];
