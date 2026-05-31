@@ -700,34 +700,33 @@ export function Warehouses() {
                             <p>{wh.machineType}</p>
                             <p className="text-green-600 font-medium">{wh.dailyRent} ج.م/يوم</p>
                           </div>
-                          <div className="flex items-center justify-center gap-1 mt-4">
-                            <button className="flex items-center gap-1 text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded transition-colors">
-                              <Eye className="w-3.5 h-3.5" />عرض
-                            </button>
+                          <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
                             <button
-                              className="flex items-center gap-1 text-xs text-gray-600 hover:bg-gray-100 px-2 py-1 rounded transition-colors"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                               onClick={() => openEditWH(wh)}
                             >
-                              <Edit className="w-3.5 h-3.5" />تعديل
+                              <Edit className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
                             </button>
                             <button
-                              className="flex items-center gap-1 text-xs text-purple-600 hover:bg-purple-50 px-2 py-1 rounded transition-colors"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                               onClick={() => { toggleExpand(wh.id); }}
                             >
                               {wh.chambers > 0 ? (
-                                <MapPin className="w-3.5 h-3.5" />
+                                <MapPin className="w-5 h-5" />
                               ) : (
-                                <Plus className="w-3.5 h-3.5" />
+                                <Plus className="w-5 h-5" />
                               )}
-                              مربعات تبريد ({wh.chambers})
+                              <span className="text-[10px] font-medium whitespace-nowrap">مربعات ({wh.chambers})</span>
                             </button>
                             <button
-                              className="flex items-center gap-1 text-xs text-red-500 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                               onClick={() =>
                                 confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع مربعات تبريدها نهائياً.` })
                               }
                             >
-                              <Trash2 className="w-3.5 h-3.5" />حذف
+                              <Trash2 className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
                             </button>
                           </div>
                         </CardContent>
@@ -909,40 +908,40 @@ export function Warehouses() {
                       </Badge>
 
                       {/* Actions */}
-                      <div className="flex items-center gap-0.5">
+                      <div className="flex items-center gap-2">
                         <button
-                          className="p-1.5 rounded hover:bg-blue-50 text-blue-600 transition-colors"
-                          title="تعديل"
+                          className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           onClick={() => openEditWH(wh)}
                         >
-                          <Edit className="w-3.5 h-3.5" />
+                          <Edit className="w-5 h-5" />
+                          <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
                         </button>
                         <button
-                          className="p-1.5 rounded hover:bg-gray-100 text-gray-500 transition-colors"
+                          className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
                           onClick={() => toggleExpand(wh.id)}
-                          title="عرض مربعات التبريد"
                         >
                           {isExpanded ? (
-                            <ChevronUp className="w-3.5 h-3.5" />
+                            <ChevronUp className="w-5 h-5" />
                           ) : (
-                            <ChevronDown className="w-3.5 h-3.5" />
+                            <ChevronDown className="w-5 h-5" />
                           )}
+                          <span className="text-[10px] font-medium whitespace-nowrap">مربعات</span>
                         </button>
                         <button
-                          className="p-1.5 rounded hover:bg-gray-100 text-gray-500 transition-colors"
-                          title="QR"
+                          className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
                           onClick={() => setQrWarehouse(wh)}
                         >
-                          <QrCode className="w-3.5 h-3.5" />
+                          <QrCode className="w-5 h-5" />
+                          <span className="text-[10px] font-medium whitespace-nowrap">QR</span>
                         </button>
                         <button
-                          className="p-1.5 rounded hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"
-                          title="حذف الثلاجة"
+                          className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           onClick={() =>
                             confirmDelete(wh.name, () => { void handleDeleteWH(wh); }, { title: "حذف الثلاجة", description: `سيتم حذف ثلاجة "${wh.name}" وجميع مربعات تبريدها نهائياً.` })
                           }
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-5 h-5" />
+                          <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
                         </button>
                       </div>
                     </div>

@@ -13,7 +13,7 @@ import {
   type AvailableSource,
 } from "../services/movementService";
 import { getAllCustomers, type BackendCustomer } from "../services/customerService";
-import { getAllItems, getAllPackages, type BackendItem, type BackendPackage } from "../services/itemService";
+import { getAllItems, getAllPackages, addItem, type BackendItem, type BackendPackage } from "../services/itemService";
 import { getAllWarehouses, getChambers, type BackendWarehouse, type BackendChamber } from "../services/warehouseService";
 import { getAllEmployees, type BackendEmployee } from "../services/employeeService";
 import { getCustomerDrivers, type BackendCustomerDriver } from "../services/customerDriverService";
@@ -22,10 +22,11 @@ import { getBrandsByItem, type BackendBrand } from "../services/brandService";
 import { resolveImageUrl } from "../services/api";
 import { getCustomerPrices, type BackendCustomerPrice } from "../services/customerPricingService";
 import {
-  Plus, Trash2, Printer, Save, Eye, Pencil,
+  Plus, Trash2, Printer, Save, Eye, EyeOff, Pencil,
   PackagePlus, PackageMinus, ArrowLeftRight, AlertCircle,
   Thermometer, MessageCircle, Gift, Cigarette, DoorOpen, X,
   List, Search, Filter, ChevronDown, ArrowRight, QrCode, Download, Tag,
+  Bell, Snowflake, Wind,
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -38,6 +39,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popove
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../components/ui/command";
 import { ChevronsUpDown, Check } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
+import { CustomerViewDialog } from "../components/CustomerViewDialog";
+import { ImageUploader } from "../components/ui/ImageUploader";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";
 import { Checkbox } from "../components/ui/checkbox";
 
@@ -479,6 +482,9 @@ function IndexTab() {
 
   /* ── QR popup (scannable large QR for any movement row) ── */
   const [qrPopup, setQrPopup] = useState<BackendMovement | null>(null);
+  const [customerDialog, setCustomerDialog] = useState<BackendCustomer | null>(null);
+  const [revealedStats, setRevealedStats] = useState<Set<number>>(new Set());
+  const toggleStat = (i: number) => setRevealedStats(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; });
 
   /* Find all backend rows that share an invoice (by base number, ignoring -N suffix). */
   const siblingsOf = (m: BackendMovement) =>
@@ -555,6 +561,7 @@ function IndexTab() {
         date: first.date,
         firstRaw: raws[0],
         allRaws: raws,
+        records,
       };
     });
   }, [filtered, rawMovements]);
@@ -570,21 +577,28 @@ function IndexTab() {
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-4">
       {/* Stats */}
-      <motion.div variants={anim} className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <motion.div variants={anim} className="grid grid-cols-3 gap-3">
         {[
-          { label: "إجمالي الوارد", value: totalIncoming.toLocaleString(), unit: "طرد", color: "border-green-200 bg-green-50", valueColor: "text-green-700", icon: PackagePlus, iconColor: "text-green-600" },
-          { label: "إجمالي المنصرف", value: totalOutgoing.toLocaleString(), unit: "طرد", color: "border-red-200 bg-red-50", valueColor: "text-red-700", icon: PackageMinus, iconColor: "text-red-600" },
-          { label: "إجمالي التحويلات", value: totalTransfers.toLocaleString(), unit: "طرد", color: "border-orange-200 bg-orange-50", valueColor: "text-orange-700", icon: ArrowLeftRight, iconColor: "text-orange-600" },
-          { label: "إجمالي النولون", value: totalNaulage.toLocaleString(), unit: "ج.م", color: "border-amber-200 bg-amber-50", valueColor: "text-amber-700", icon: List, iconColor: "text-amber-600" },
+          { label: "إجمالي الوارد", value: totalIncoming.toLocaleString(), unit: "وحدة", color: "border-green-200 bg-green-50", valueColor: "text-green-700", icon: PackagePlus, iconColor: "text-green-600" },
+          { label: "إجمالي المنصرف", value: totalOutgoing.toLocaleString(), unit: "وحدة", color: "border-red-200 bg-red-50", valueColor: "text-red-700", icon: PackageMinus, iconColor: "text-red-600" },
+          { label: "إجمالي التحويلات", value: totalTransfers.toLocaleString(), unit: "وحدة", color: "border-orange-200 bg-orange-50", valueColor: "text-orange-700", icon: ArrowLeftRight, iconColor: "text-orange-600" },
         ].map((s, i) => {
           const SIcon = s.icon;
+          const revealed = revealedStats.has(i);
           return (
             <Card key={i} className={`border shadow-sm ${s.color}`}>
               <CardContent className="p-4 flex items-center gap-3">
-                <div className={`p-2 rounded-lg bg-white/60`}><SIcon className={`w-4 h-4 ${s.iconColor}`} /></div>
-                <div>
+                <div className="p-2 rounded-lg bg-white/60"><SIcon className={`w-4 h-4 ${s.iconColor}`} /></div>
+                <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-500">{s.label}</p>
-                  <p className={`text-xl font-bold ${s.valueColor}`}>{s.value} <span className="text-xs font-normal">{s.unit}</span></p>
+                  <div className="flex items-center gap-1.5">
+                    <p className={`text-xl font-bold transition-all ${s.valueColor} ${!revealed ? "blur-sm select-none" : ""}`}>
+                      {s.value} <span className="text-xs font-normal">{s.unit}</span>
+                    </p>
+                    <button onClick={() => toggleStat(i)} className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
+                      {revealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -744,8 +758,21 @@ function IndexTab() {
                             {TYPE_LABELS[g.type]}
                           </span>
                         </td>
-                        <td className="px-3 py-3 font-mono text-xs text-blue-600 whitespace-nowrap">{g.invoiceBase}</td>
-                        <td className="px-3 py-3 text-gray-700 text-xs">{g.customer}</td>
+                        <td
+                          className="px-3 py-3 font-mono text-xs text-blue-600 whitespace-nowrap cursor-pointer hover:underline"
+                          onClick={() => navigate(`/movements/${g.firstRaw.id}`)}
+                        >
+                          {g.invoiceBase}
+                        </td>
+                        <td
+                          className="px-3 py-3 text-gray-700 text-xs cursor-pointer hover:text-blue-600 hover:underline transition-colors"
+                          onClick={() => {
+                            const c = customers.find(c => (c.arName || c.name) === g.customer || c.name === g.customer);
+                            if (c) setCustomerDialog(c);
+                          }}
+                        >
+                          {g.customer}
+                        </td>
                         <td className="px-3 py-3 text-gray-700 text-xs">
                           {g.itemNames.length === 1
                             ? g.itemNames[0]
@@ -757,9 +784,31 @@ function IndexTab() {
                           }
                         </td>
                         <td className="px-3 py-3">
-                          <span className="font-semibold text-gray-800">{g.totalQty.toLocaleString()}</span>
-                          <span className="text-xs text-gray-400 mr-1">طرد</span>
-                          {g.totalWeight > 0 && <span className="text-xs text-gray-400 block">{g.totalWeight.toLocaleString()} كجم</span>}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="cursor-default inline-block">
+                                <span className="font-semibold text-gray-800">{g.totalQty.toLocaleString()}</span>
+                                <span className="text-xs text-gray-400 mr-1">طرد</span>
+                                {g.totalWeight > 0 && <span className="text-xs text-gray-400 block">{g.totalWeight.toLocaleString()} كجم</span>}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" dir="rtl" className="bg-white text-gray-800 border border-gray-200 shadow-xl p-0 rounded-xl max-w-xs">
+                              <div className="px-3 pt-2.5 pb-1 border-b border-gray-100">
+                                <p className="text-xs font-semibold text-gray-600">تفاصيل الأصناف</p>
+                              </div>
+                              <div className="p-2 space-y-1">
+                                {g.records.map((r, ri) => (
+                                  <div key={ri} className="flex items-center justify-between gap-4 px-1 py-0.5 rounded hover:bg-gray-50 text-xs">
+                                    <span className="text-gray-700 font-medium truncate">{r.item}</span>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      <span className="text-blue-600 font-semibold">{r.quantity} وحدة</span>
+                                      {(r.weight ?? 0) > 0 && <span className="text-gray-400">{r.weight} كجم</span>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
                         </td>
                         <td className="px-3 py-3 text-amber-600 font-medium text-xs">{g.totalNaulage > 0 ? g.totalNaulage.toLocaleString() + " ج.م" : "—"}</td>
                         <td className="px-3 py-3 text-gray-600 text-xs">{g.warehouse}</td>
@@ -775,21 +824,25 @@ function IndexTab() {
                           </button>
                         </td>
                         <td className="px-3 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-0.5">
-                            <button title="عرض" onClick={() => navigate(`/movements/${g.firstRaw.id}`)} className="p-1.5 rounded hover:bg-blue-50 text-blue-600">
-                              <Eye className="w-3.5 h-3.5" />
+                          <div className="flex items-center gap-2">
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" onClick={() => navigate(`/movements/${g.firstRaw.id}`)}>
+                              <Eye className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">عرض</span>
                             </button>
-                            <button title="تعديل" onClick={() => navigate(`/movements/${g.firstRaw.id}/edit`)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500">
-                              <Pencil className="w-3.5 h-3.5" />
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => navigate(`/movements/${g.firstRaw.id}/edit`)}>
+                              <Pencil className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
                             </button>
-                            <button title="طباعة الفاتورة" onClick={() => printMovement(g.firstRaw)} className="p-1.5 rounded hover:bg-indigo-50 text-indigo-600">
-                              <Printer className="w-3.5 h-3.5" />
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" onClick={() => printMovement(g.firstRaw)}>
+                              <Printer className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">طباعة</span>
                             </button>
-                            <button title="طباعة ملصق QR" onClick={() => printQrLabel(g.firstRaw)} className="p-1.5 rounded hover:bg-green-50 text-green-600">
-                              <Tag className="w-3.5 h-3.5" />
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors" onClick={() => printQrLabel(g.firstRaw)}>
+                              <Tag className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">QR ملصق</span>
                             </button>
                             <button
-                              title="حذف الفاتورة"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                               onClick={() => confirmDelete(
                                 g.invoiceBase,
                                 async () => {
@@ -799,9 +852,9 @@ function IndexTab() {
                                 },
                                 { title: "حذف الفاتورة", description: `سيتم حذف فاتورة ${g.invoiceBase} (${g.allRaws.length} صنف) نهائياً.` }
                               )}
-                              className="p-1.5 rounded hover:bg-red-50 text-red-500"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
                             </button>
                           </div>
                         </td>
@@ -818,6 +871,8 @@ function IndexTab() {
       {confirmDialog}
 
       <QrPopupDialog movement={qrPopup} onClose={() => setQrPopup(null)} />
+
+      <CustomerViewDialog customer={customerDialog} onClose={() => setCustomerDialog(null)} />
     </motion.div>
   );
 }
@@ -1385,6 +1440,7 @@ function CustomerCombobox({
 interface IncomingRow {
   id: number;
   backendId?: string;
+  backendMovementNumber?: string;
   itemId: string; item: string;
   packageId: string; pkg: string;
   quantity: string;
@@ -1408,6 +1464,213 @@ const emptyRow = (): IncomingRow => ({
   weightPerUnit: "",
   brandId: "", brandName: "",
 });
+
+/* ── ItemComboboxCell: searchable item select with full quick-add dialog ── */
+function ItemComboboxCell({
+  value,
+  items,
+  onSelect,
+  onItemAdded,
+}: {
+  value: string;
+  items: BackendItem[];
+  onSelect: (id: string, name: string) => void;
+  onItemAdded: (item: BackendItem) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
+
+  const filtered = items.filter(i =>
+    (i.arName || i.name || "").toLowerCase().includes(query.toLowerCase())
+  );
+  const selected = items.find(i => i.id === value);
+  const displayName = selected ? (selected.arName || selected.name) : "";
+
+  const openAdd = (prefill = "") => {
+    setForm({ prefix: "", code: "", name: prefill, storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
+    setShowAdd(true);
+  };
+
+  const handleAdd = async () => {
+    if (!form.name.trim()) { toast.error("أدخل اسم الصنف"); return; }
+    if (!form.storageType) { toast.error("اختر احتياج التخزين"); return; }
+    setSaving(true);
+    try {
+      const created = await addItem({
+        code: form.code || `ITM-${Date.now().toString().slice(-6)}`,
+        prefix: form.prefix || undefined,
+        name: form.name.trim(),
+        arName: form.name.trim(),
+        storageType: form.storageType,
+        shelfLifeDays: form.maxDays ? Number(form.maxDays) : undefined,
+        alertDaysBeforeExpiry: form.alertDays ? Number(form.alertDays) : undefined,
+        temperatureMin: form.tempMin ? Number(form.tempMin) : undefined,
+        temperatureMax: form.tempMax ? Number(form.tempMax) : undefined,
+        imageUrl: form.image || undefined,
+      });
+      onItemAdded(created);
+      onSelect(created.id, created.arName || created.name || form.name.trim());
+      setShowAdd(false);
+      setOpen(false);
+      setQuery("");
+      toast.success(`تم إضافة الصنف "${created.arName || created.name}"`);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل إضافة الصنف");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Popover open={open} onOpenChange={o => { setOpen(o); if (!o) setQuery(""); }}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            dir="rtl"
+            className={cn(
+              "flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1 h-8 text-xs text-gray-800 whitespace-nowrap outline-none transition-[border-color,box-shadow] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20",
+              !displayName && "text-gray-400",
+            )}
+          >
+            {displayName ? (
+              <div className="flex items-center gap-1.5 min-w-0">
+                <OptionAvatar imageUrl={selected?.imageUrl} initial={selected?.prefix || displayName.charAt(0)} grad={itemGrad(selected?.storageType ?? "")} />
+                <span className="truncate">{displayName}</span>
+              </div>
+            ) : (
+              <span>اختر الصنف</span>
+            )}
+            <ChevronDown className="size-3.5 opacity-50 flex-shrink-0" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="p-0 w-60 flex flex-col" dir="rtl" align="start">
+          <Command shouldFilter={false}>
+            <CommandInput placeholder="ابحث عن صنف..." value={query} onValueChange={setQuery} className="h-8 text-xs" />
+            <CommandList>
+              {filtered.length === 0 ? (
+                <div className="py-4 text-center text-xs text-gray-400">لا توجد نتائج</div>
+              ) : (
+                <CommandGroup>
+                  {filtered.map(i => (
+                    <CommandItem
+                      key={i.id}
+                      value={i.id}
+                      onSelect={() => { onSelect(i.id, i.arName || i.name || ""); setOpen(false); setQuery(""); }}
+                      className="text-xs gap-2"
+                    >
+                      <OptionAvatar imageUrl={i.imageUrl} initial={i.prefix || (i.arName || i.name || "?").charAt(0)} grad={itemGrad(i.storageType)} />
+                      {i.arName || i.name}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
+            </CommandList>
+          </Command>
+          {/* Add button fixed at the bottom */}
+          <div className="border-t border-gray-100 px-2 py-1.5 flex-shrink-0">
+            <button
+              type="button"
+              className="flex items-center gap-2 w-full px-2.5 py-1.5 text-xs text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium"
+              onClick={() => { openAdd(query); setOpen(false); }}
+            >
+              <Plus className="w-3.5 h-3.5 flex-shrink-0" />
+              <span className="truncate">{query ? `إضافة "${query}"` : "إضافة صنف جديد"}</span>
+            </button>
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {/* Full add-item dialog */}
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
+        <DialogContent dir="rtl" className="max-w-lg bg-white rounded-2xl border border-gray-100 shadow-xl overflow-hidden" style={{ maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+          <DialogHeader className="flex-shrink-0 px-6 pt-6 pb-0">
+            <DialogTitle>إضافة صنف جديد</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1 px-6 overflow-y-auto flex-1">
+            <ImageUploader label="صورة الصنف" folder="items" value={form.image} onChange={v => setForm(f => ({ ...f, image: v }))} />
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label>حرف الكود <span className="text-red-500">*</span></Label>
+                <Input
+                  placeholder="ج" value={form.prefix} dir="rtl" maxLength={3}
+                  className="border border-[#d1d5dc] bg-[#f9fafb] text-center"
+                  onChange={e => { const v = e.target.value; setForm(f => ({ ...f, prefix: v, code: v ? `${v}-001` : "" })); }}
+                />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label>كود الصنف</Label>
+                <Input placeholder="ج-001" value={form.code} dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] font-mono"
+                  onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>اسم الصنف <span className="text-red-500">*</span></Label>
+              <Input placeholder="مثال: جبنة رومي" value={form.name} dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
+                autoFocus onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>احتياج التخزين <span className="text-red-500">*</span></Label>
+              <Select onValueChange={v => setForm(f => ({ ...f, storageType: v }))}>
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر نوع التخزين" /></SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="تبريد"><div className="flex items-center gap-2"><Thermometer className="w-3.5 h-3.5 text-cyan-600" />تبريد</div></SelectItem>
+                  <SelectItem value="تجميد"><div className="flex items-center gap-2"><Snowflake className="w-3.5 h-3.5 text-blue-600" />تجميد</div></SelectItem>
+                  <SelectItem value="تنشير"><div className="flex items-center gap-2"><Wind className="w-3.5 h-3.5 text-amber-600" />تنشير</div></SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>فترة التخزين (يوم)</Label>
+                <Input type="number" placeholder="0" value={form.maxDays} dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
+                  onChange={e => setForm(f => ({ ...f, maxDays: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Bell className="w-3 h-3 text-orange-500" />تنبيه بعد (يوم)</Label>
+                <Input type="number" placeholder="0" value={form.alertDays} dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
+                  onChange={e => setForm(f => ({ ...f, alertDays: e.target.value }))} />
+              </div>
+            </div>
+            {form.maxDays && form.alertDays && (
+              <p className="text-xs text-orange-600 flex items-center gap-1 bg-orange-50 px-3 py-2 rounded-lg">
+                <Bell className="w-3 h-3 flex-shrink-0" />
+                سيتم إرسال تنبيه بعد <strong>{Number(form.maxDays) - Number(form.alertDays)}</strong> يوم من تاريخ الإيداع
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Thermometer className="w-3 h-3 text-blue-500" />درجة حرارة دنيا (°م)</Label>
+                <Input type="number" placeholder="-18" value={form.tempMin} dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
+                  onChange={e => setForm(f => ({ ...f, tempMin: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Thermometer className="w-3 h-3 text-red-500" />درجة حرارة قصوى (°م)</Label>
+                <Input type="number" placeholder="-15" value={form.tempMax} dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
+                  onChange={e => setForm(f => ({ ...f, tempMax: e.target.value }))} />
+              </div>
+            </div>
+            {(form.tempMin || form.tempMax) && (
+              <p className="text-xs text-blue-600 flex items-center gap-1 bg-blue-50 px-3 py-2 rounded-lg">
+                <Thermometer className="w-3 h-3 flex-shrink-0" />
+                نطاق درجة الحرارة: <strong>{form.tempMin || "—"}°م</strong> إلى <strong>{form.tempMax || "—"}°م</strong>
+              </p>
+            )}
+          </div>
+          <DialogFooter className="flex-shrink-0 gap-2 justify-end px-6 py-4 border-t border-gray-100 mt-2">
+            <Button onClick={handleAdd} disabled={saving || !form.name.trim() || !form.storageType} className="bg-[#155dfc] hover:bg-blue-700 text-white">
+              {saving ? "جاري الحفظ..." : "حفظ"}
+            </Button>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 function IncomingTab({
   editTarget = null,
@@ -1509,6 +1772,7 @@ function IncomingTab({
     const prefRows: IncomingRow[] = editSiblings.map(s => ({
       id: Date.now() + Math.floor(Math.random() * 100000),
       backendId: s.id,
+      backendMovementNumber: s.movementNumber,
       itemId: s.itemId,
       item: s.itemArName ?? s.itemName ?? "",
       packageId: s.packageId ?? "",
@@ -1642,14 +1906,22 @@ function IncomingTab({
         const keptIds = new Set(validRows.filter(r => r.backendId).map(r => r.backendId!));
         const removedIds = originalSiblingIds.filter(id => !keptIds.has(id));
 
+        // derive base invoice number and highest existing suffix for new-row numbering
+        const baseNo = baseInvoiceNo(invoiceNo);
+        const maxExistingSuffix = editSiblings.reduce((max, s) => {
+          const m = s.movementNumber.match(/-([1-9]\d?)$/);
+          return m ? Math.max(max, parseInt(m[1])) : max;
+        }, 0);
+        let newRowSuffix = maxExistingSuffix;
+
         // 1) Deactivate rows the user removed
         await Promise.all(removedIds.map(id => deactivateMovement(id)));
 
-        // 2) Update existing rows in place
+        // 2) Update existing rows in place — each keeps its own original movementNumber
         await Promise.all(validRows.filter(r => r.backendId).map(r =>
           editMovement({
             id: r.backendId!,
-            movementNumber: invoiceNo,
+            movementNumber: r.backendMovementNumber ?? invoiceNo,
             movementType: "Incoming",
             movementDate: isoDate,
             customerId: selectedCustomerId,
@@ -1679,10 +1951,10 @@ function IncomingTab({
           })
         ));
 
-        // 3) Add brand-new rows under the same invoice
+        // 3) Add brand-new rows under the same invoice with unique suffixes
         await Promise.all(validRows.filter(r => !r.backendId).map(r =>
           addMovement({
-            movementNumber: invoiceNo,
+            movementNumber: `${baseNo}-${++newRowSuffix}`,
             movementType: "Incoming",
             movementDate: isoDate,
             customerId: selectedCustomerId,
@@ -1820,8 +2092,11 @@ function IncomingTab({
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label>التاريخ *</Label>
-                <Input type="date" dir="rtl" value={movementDate} onChange={e => setMovementDate(e.target.value)} />
+                <Label>الثلاجة المستلم *</Label>
+                <Select value={selectedWarehouseId} onValueChange={onWarehouseChange}>
+                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر الثلاجة" /></SelectTrigger>
+                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label>السائق</Label>
@@ -1855,15 +2130,8 @@ function IncomingTab({
                 <Input placeholder="أ ب ج 1234" dir="rtl" value={vehiclePlate} onChange={e => setVehiclePlate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>الثلاجة المستلم *</Label>
-                <Select value={selectedWarehouseId} onValueChange={onWarehouseChange}>
-                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر الثلاجة" /></SelectTrigger>
-                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-2 md:col-span-3 space-y-1.5">
-                <Label>ملاحظات</Label>
-                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} value={notes} onChange={e => setNotes(e.target.value)} />
+                <Label>التاريخ *</Label>
+                <Input type="date" dir="rtl" value={movementDate} onChange={e => setMovementDate(e.target.value)} />
               </div>
             </div>
           </CardContent>
@@ -1892,35 +2160,26 @@ function IncomingTab({
                     <motion.tr key={row.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="border-b hover:bg-gray-50/30 transition-colors">
                       <td className="px-3 py-2 text-gray-500 text-xs">{idx + 1}</td>
                       <td className="px-2 py-1.5">
-                        <Select value={row.itemId} onValueChange={v => {
-                          const it = items.find(i => i.id === v);
-                          const itName = it?.arName || it?.name || "";
-                          const n = lookupCustomerNaulage(v, itName);
-                          if (n) {
-                            const pkg = findPackageByUnit(n.naulageUnit);
-                            updateRow(row.id, {
-                              itemId: v,
-                              item: itName,
-                              naulage: n.naulage,
-                              naulageUnit: n.naulageUnit,
-                              brandId: "", brandName: "",
-                              ...(pkg ? { packageId: pkg.id, pkg: pkg.arName || pkg.name || pkg.packageType || n.naulageUnit } : {}),
-                            });
-                          } else {
-                            updateRow(row.id, { itemId: v, item: itName, naulage: "", naulageUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
-                          }
-                          void loadBrandsForItem(v);
-                        }}>
-                          <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="اختر الصنف" /></SelectTrigger>
-                          <SelectContent dir="rtl">{items.map(i => (
-                            <SelectItem key={i.id} value={i.id}>
-                              <div className="flex items-center gap-2">
-                                <OptionAvatar imageUrl={i.imageUrl} initial={i.prefix || (i.arName || i.name || "?").charAt(0)} grad={itemGrad(i.storageType)} />
-                                {i.arName || i.name}
-                              </div>
-                            </SelectItem>
-                          ))}</SelectContent>
-                        </Select>
+                        <ItemComboboxCell
+                          value={row.itemId}
+                          items={items}
+                          onSelect={(v, itName) => {
+                            const n = lookupCustomerNaulage(v, itName);
+                            if (n) {
+                              const pkg = findPackageByUnit(n.naulageUnit);
+                              updateRow(row.id, {
+                                itemId: v, item: itName,
+                                naulage: n.naulage, naulageUnit: n.naulageUnit,
+                                brandId: "", brandName: "",
+                                ...(pkg ? { packageId: pkg.id, pkg: pkg.arName || pkg.name || pkg.packageType || n.naulageUnit } : {}),
+                              });
+                            } else {
+                              updateRow(row.id, { itemId: v, item: itName, naulage: "", naulageUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
+                            }
+                            void loadBrandsForItem(v);
+                          }}
+                          onItemAdded={item => setItems(prev => [...prev, item])}
+                        />
                       </td>
                       {/* Brand cell */}
                       <td className="px-2 py-1.5">
@@ -2110,6 +2369,18 @@ function IncomingTab({
         </Card>
       </motion.div>
 
+      {/* Notes — after items */}
+      <motion.div variants={anim}>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} value={notes} onChange={e => setNotes(e.target.value)} />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
       {/* Footer */}
       <motion.div variants={anim}>
         <Card className="border-0 shadow-sm bg-green-50 border border-green-100">
@@ -2219,9 +2490,11 @@ function IncomingTab({
 interface OutgoingRow {
   id: number;
   backendId?: string;
+  backendMovementNumber?: string;
   incomingMovementNumber: string;
   incomingMovementDate: string;
   itemId: string; item: string;
+  brandId: string; brandName: string;
   packageId: string; pkg: string;
   requestedQty: string;
   availableQty: number; availableUnit: string;
@@ -2231,7 +2504,8 @@ interface OutgoingRow {
 const emptyOutRow = (): OutgoingRow => ({
   id: Date.now() + Math.floor(Math.random() * 1000),
   incomingMovementNumber: "", incomingMovementDate: "",
-  itemId: "", item: "", packageId: "", pkg: "",
+  itemId: "", item: "", brandId: "", brandName: "",
+  packageId: "", pkg: "",
   requestedQty: "", availableQty: 0, availableUnit: "",
   serial: "", damaged: "0", chamber: "", naulage: "", naulageUnit: DEFAULT_NAULAGE_UNIT,
 });
@@ -2327,10 +2601,13 @@ function OutgoingTab({
     const prefRows: OutgoingRow[] = editSiblings.map(s => ({
       id: Date.now() + Math.floor(Math.random() * 100000),
       backendId: s.id,
+      backendMovementNumber: s.movementNumber,
       incomingMovementNumber: s.sourceMovementNumber ?? "",
       incomingMovementDate: "",
       itemId: s.itemId,
       item: s.itemArName ?? s.itemName ?? "",
+      brandId: s.brandId ?? "",
+      brandName: s.brandName ?? "",
       packageId: s.packageId ?? "",
       pkg: s.packageName ?? "",
       requestedQty: String(s.quantity ?? ""),
@@ -2405,7 +2682,9 @@ function OutgoingTab({
     const found = customerIncomingMovements.find(m =>
       m.movementNumber === r.incomingMovementNumber
       && m.itemId === r.itemId
-      && (m.packageId ?? null) === (r.packageId || null));
+      && (m.packageId ?? null) === (r.packageId || null)
+      && (!r.brandId || m.brandId === r.brandId || m.brandName === r.brandName)
+    );
     return found?.id;
   };
 
@@ -2445,11 +2724,51 @@ function OutgoingTab({
     return incomingInvoices.filter(inv => inv.rows.some(r => r.itemId === itemId));
   };
 
-  const getInvoiceItemAvailQty = (movementNumber: string, itemId: string): number => {
+  const getInvoiceItemAvailQty = (movementNumber: string, itemId: string, brandId?: string): number => {
     if (!movementNumber || !itemId) return 0;
     const inv = incomingInvoices.find(x => x.movementNumber === movementNumber);
     if (!inv) return 0;
-    return inv.rows.filter(r => r.itemId === itemId).reduce((s, r) => s + (r.quantity || 0), 0);
+    return inv.rows.filter(r =>
+      r.itemId === itemId &&
+      (!brandId || r.brandId === brandId || r.brandName === brandId)
+    ).reduce((s, r) => s + (r.quantity || 0), 0);
+  };
+
+  // Get unique brands available in incoming movements, filtered by invoice and/or item
+  const getAvailableBrands = (movementNumber?: string, itemId?: string): { id: string; name: string }[] => {
+    let movements = customerIncomingMovements;
+    if (movementNumber) movements = movements.filter(m => m.movementNumber === movementNumber);
+    if (itemId) movements = movements.filter(m => m.itemId === itemId);
+    const brands = new Map<string, string>();
+    for (const m of movements) {
+      if (m.brandId || m.brandName) {
+        const key = m.brandId || m.brandName || "";
+        if (key) brands.set(key, m.brandName || m.brandId || "");
+      }
+    }
+    return Array.from(brands.entries()).map(([id, name]) => ({ id, name }));
+  };
+
+  // Filter invoices to those containing a given brand (and optionally item)
+  const getInvoicesForBrand = (brandId: string, itemId?: string) => {
+    if (!brandId) return itemId ? getInvoicesContainingItem(itemId) : incomingInvoices;
+    return incomingInvoices.filter(inv =>
+      inv.rows.some(r =>
+        (r.brandId === brandId || r.brandName === brandId) &&
+        (!itemId || r.itemId === itemId)
+      )
+    );
+  };
+
+  // Filter items to those associated with a given brand (and optionally invoice)
+  const getItemsForBrand = (brandId: string, movementNumber?: string): BackendItem[] => {
+    if (!brandId) return getInvoiceItems(movementNumber || "");
+    let movements = customerIncomingMovements.filter(m =>
+      m.brandId === brandId || m.brandName === brandId
+    );
+    if (movementNumber) movements = movements.filter(m => m.movementNumber === movementNumber);
+    const ids = new Set(movements.map(m => m.itemId));
+    return items.filter(i => ids.has(i.id));
   };
 
   const getInvoiceItemPackage = (movementNumber: string, itemId: string): { packageId: string; packageName: string; unit: string } => {
@@ -2531,6 +2850,13 @@ function OutgoingTab({
         const keptIds = new Set(validRows.filter(r => r.backendId).map(r => r.backendId!));
         const removedIds = originalSiblingIds.filter(id => !keptIds.has(id));
 
+        const baseNo = baseInvoiceNo(invoiceNo);
+        const maxExistingSuffix = editSiblings.reduce((max, s) => {
+          const m = s.movementNumber.match(/-([1-9]\d?)$/);
+          return m ? Math.max(max, parseInt(m[1])) : max;
+        }, 0);
+        let newRowSuffix = maxExistingSuffix;
+
         await Promise.all(removedIds.map(id => deactivateMovement(id)));
 
         for (const r of validRows) {
@@ -2541,7 +2867,7 @@ function OutgoingTab({
         await Promise.all(validRows.filter(r => r.backendId).map(r =>
           editMovement({
             id: r.backendId!,
-            movementNumber: invoiceNo,
+            movementNumber: r.backendMovementNumber ?? invoiceNo,
             movementType: "Outgoing",
             movementDate: isoDate,
             customerId: selectedCustomerId,
@@ -2560,13 +2886,15 @@ function OutgoingTab({
             naulageUnit: r.naulageUnit || undefined,
             openingFee: openingFee ? Number(openingFee) : undefined,
             damagedQuantity: r.damaged ? Number(r.damaged) : undefined,
+            brandId: r.brandId || undefined,
+            brandName: r.brandName || undefined,
             isActive: true,
           })
         ));
 
         await Promise.all(validRows.filter(r => !r.backendId).map(r =>
           addMovement({
-            movementNumber: invoiceNo,
+            movementNumber: `${baseNo}-${++newRowSuffix}`,
             movementType: "Outgoing",
             movementDate: isoDate,
             customerId: selectedCustomerId,
@@ -2585,6 +2913,8 @@ function OutgoingTab({
             naulageUnit: r.naulageUnit || undefined,
             openingFee: openingFee ? Number(openingFee) : undefined,
             damagedQuantity: r.damaged ? Number(r.damaged) : undefined,
+            brandId: r.brandId || undefined,
+            brandName: r.brandName || undefined,
           })
         ));
 
@@ -2689,8 +3019,11 @@ function OutgoingTab({
                 )}
               </div>
               <div className="space-y-1.5">
-                <Label>التاريخ *</Label>
-                <Input type="date" dir="rtl" value={movementDate} onChange={e => setMovementDate(e.target.value)} />
+                <Label>الثلاجة *</Label>
+                <Select value={selectedWarehouseId} onValueChange={setSelectedWarehouseId}>
+                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر الثلاجة" /></SelectTrigger>
+                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label>السائق *</Label>
@@ -2724,19 +3057,12 @@ function OutgoingTab({
                 <Input placeholder="أ ب ج 1234" dir="rtl" value={vehiclePlate} onChange={e => setVehiclePlate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>الثلاجة *</Label>
-                <Select value={selectedWarehouseId} onValueChange={setSelectedWarehouseId}>
-                  <SelectTrigger dir="rtl"><SelectValue placeholder="اختر الثلاجة" /></SelectTrigger>
-                  <SelectContent dir="rtl">{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.arName || w.name}</SelectItem>)}</SelectContent>
-                </Select>
+                <Label>التاريخ *</Label>
+                <Input type="date" dir="rtl" value={movementDate} onChange={e => setMovementDate(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1.5"><Thermometer className="w-3.5 h-3.5 text-blue-500" />درجة الحرارة (°م)</Label>
                 <Input type="number" placeholder="-18" dir="rtl" value={temperature} onChange={e => setTemperature(e.target.value)} className="border border-[#d1d5dc] bg-[#f9fafb]" />
-              </div>
-              <div className="col-span-2 md:col-span-3 space-y-1.5">
-                <Label>ملاحظات</Label>
-                <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} value={notes} onChange={e => setNotes(e.target.value)} />
               </div>
             </div>
           </CardContent>
@@ -2751,10 +3077,10 @@ function OutgoingTab({
           </div>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1320px]">
+              <table className="w-full text-sm min-w-[1500px]">
                 <thead>
                   <tr className="bg-red-50 border-b border-red-100">
-                    {["#","حركة الوارد","الصنف","العبوة","الكمية المطلوبة","الكمية المتاحة","أيام التخزين","إجمالي السعر","رقم الرسالة","العوارية","مربع التبريد","النولون (ج.م + الوحدة)",""].map((h,i) => (
+                    {["#","حركة الوارد","الصنف","الماركة","العبوة","الكمية المطلوبة","الكمية المتاحة","أيام التخزين","إجمالي السعر","رقم الرسالة","العوارية","مربع التبريد","النولون (ج.م + الوحدة)",""].map((h,i) => (
                       <th key={i} className={cn("text-right px-3 py-2.5 text-xs font-medium text-red-800", i===11?"bg-amber-50 text-amber-800":"", i===6?"text-rose-700":"", i===7?"bg-rose-50 text-rose-800":"")}>{h}</th>
                     ))}
                   </tr>
@@ -2771,8 +3097,12 @@ function OutgoingTab({
                             onValueChange={v => {
                               const inv = incomingInvoices.find(x => x.movementNumber === v);
                               if (!inv) return;
-                              if (row.itemId && inv.rows.some(r => r.itemId === row.itemId)) {
-                                const availQty = getInvoiceItemAvailQty(v, row.itemId);
+                              const itemMatches = row.itemId && inv.rows.some(r =>
+                                r.itemId === row.itemId &&
+                                (!row.brandId || r.brandId === row.brandId || r.brandName === row.brandName)
+                              );
+                              if (itemMatches) {
+                                const availQty = getInvoiceItemAvailQty(v, row.itemId, row.brandId || undefined);
                                 const invPkg = getInvoiceItemPackage(v, row.itemId);
                                 const pkgFromList = invPkg.packageId ? packages.find(p => p.id === invPkg.packageId) : undefined;
                                 const pkgName = invPkg.packageName || pkgFromList?.arName || pkgFromList?.name || pkgFromList?.packageType || "";
@@ -2792,15 +3122,12 @@ function OutgoingTab({
                                 updateRow(row.id, {
                                   incomingMovementNumber: v,
                                   incomingMovementDate: inv.movementDate,
-                                  itemId: "",
-                                  item: "",
-                                  packageId: "",
-                                  pkg: "",
+                                  itemId: "", item: "",
+                                  brandId: "", brandName: "",
+                                  packageId: "", pkg: "",
                                   requestedQty: "",
-                                  availableQty: 0,
-                                  availableUnit: "",
-                                  naulage: "",
-                                  naulageUnit: DEFAULT_NAULAGE_UNIT,
+                                  availableQty: 0, availableUnit: "",
+                                  naulage: "", naulageUnit: DEFAULT_NAULAGE_UNIT,
                                 });
                               }
                             }}
@@ -2812,13 +3139,13 @@ function OutgoingTab({
                                   ? "اختر العميل أولاً"
                                   : incomingInvoices.length === 0
                                     ? "لا توجد فواتير وارد"
-                                    : row.itemId && getInvoicesContainingItem(row.itemId).length > 1
+                                    : (row.itemId || row.brandId) && getInvoicesForBrand(row.brandId, row.itemId || undefined).length > 1
                                       ? "متعدد — اختر فاتورة"
                                       : "اختياري — اختر فاتورة"
                               } />
                             </SelectTrigger>
                             <SelectContent dir="rtl">
-                              {(row.itemId ? getInvoicesContainingItem(row.itemId) : incomingInvoices).map(inv => (
+                              {getInvoicesForBrand(row.brandId, row.itemId || undefined).map(inv => (
                                 <SelectItem key={inv.movementNumber} value={inv.movementNumber}>
                                   {inv.movementNumber} — {(inv.movementDate || "").slice(0, 10)}
                                 </SelectItem>
@@ -2826,65 +3153,98 @@ function OutgoingTab({
                             </SelectContent>
                           </Select>
                         </td>
+                        {/* Item cell */}
                         <td className="px-2 py-1.5">
                           <Select value={row.itemId} onValueChange={v => {
                             const it = items.find(i => i.id === v);
                             const itName = it?.arName || it?.name || "";
-
                             let invNum = row.incomingMovementNumber;
                             let invDate = row.incomingMovementDate;
                             if (!invNum) {
-                              const matches = getInvoicesContainingItem(v);
-                              if (matches.length === 1) {
-                                invNum = matches[0].movementNumber;
-                                invDate = matches[0].movementDate;
-                              }
+                              const matches = getInvoicesForBrand(row.brandId, v);
+                              if (matches.length === 1) { invNum = matches[0].movementNumber; invDate = matches[0].movementDate; }
                             }
-
                             if (!invNum) {
-                              updateRow(row.id, {
-                                itemId: v,
-                                item: itName,
-                                packageId: "",
-                                pkg: "",
-                                availableQty: 0,
-                                availableUnit: "",
-                                naulage: "",
-                                naulageUnit: DEFAULT_NAULAGE_UNIT,
-                              });
+                              updateRow(row.id, { itemId: v, item: itName, packageId: "", pkg: "", availableQty: 0, availableUnit: "", naulage: "", naulageUnit: DEFAULT_NAULAGE_UNIT });
                               return;
                             }
-
-                            const availQty = getInvoiceItemAvailQty(invNum, v);
+                            const availQty = getInvoiceItemAvailQty(invNum, v, row.brandId || undefined);
                             const invPkg = getInvoiceItemPackage(invNum, v);
                             const pkgFromList = invPkg.packageId ? packages.find(p => p.id === invPkg.packageId) : undefined;
                             const pkgName = invPkg.packageName || pkgFromList?.arName || pkgFromList?.name || pkgFromList?.packageType || "";
-                            const availUnit = invPkg.unit || pkgName || "";
                             const n = lookupCustomerNaulage(v, itName, pkgName || undefined);
                             updateRow(row.id, {
-                              itemId: v,
-                              item: itName,
-                              incomingMovementNumber: invNum,
-                              incomingMovementDate: invDate,
-                              availableQty: availQty,
-                              availableUnit: availUnit,
-                              packageId: invPkg.packageId,
-                              pkg: pkgName,
-                              naulage: n ? n.naulage : "",
-                              naulageUnit: pkgName || (n ? n.naulageUnit : DEFAULT_NAULAGE_UNIT),
+                              itemId: v, item: itName,
+                              incomingMovementNumber: invNum, incomingMovementDate: invDate,
+                              availableQty: availQty, availableUnit: invPkg.unit || pkgName || "",
+                              packageId: invPkg.packageId, pkg: pkgName,
+                              naulage: n ? n.naulage : "", naulageUnit: pkgName || (n ? n.naulageUnit : DEFAULT_NAULAGE_UNIT),
                             });
                           }}>
                             <SelectTrigger className="h-8 text-xs" dir="rtl"><SelectValue placeholder="الصنف" /></SelectTrigger>
-                            <SelectContent dir="rtl">{getInvoiceItems(row.incomingMovementNumber).map(i => (
-                              <SelectItem key={i.id} value={i.id}>
-                                <div className="flex items-center gap-2">
-                                  <OptionAvatar imageUrl={i.imageUrl} initial={i.prefix || (i.arName || i.name || "?").charAt(0)} grad={itemGrad(i.storageType)} />
-                                  {i.arName || i.name}
-                                </div>
-                              </SelectItem>
-                            ))}</SelectContent>
+                            <SelectContent dir="rtl">
+                              {getItemsForBrand(row.brandId, row.incomingMovementNumber || undefined).map(i => (
+                                <SelectItem key={i.id} value={i.id}>
+                                  <div className="flex items-center gap-2">
+                                    <OptionAvatar imageUrl={i.imageUrl} initial={i.prefix || (i.arName || i.name || "?").charAt(0)} grad={itemGrad(i.storageType)} />
+                                    {i.arName || i.name}
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
                           </Select>
                         </td>
+                        {/* Brand cell */}
+                        <td className="px-2 py-1.5">
+                          <Select
+                            value={row.brandId}
+                            onValueChange={v => {
+                              const brands = getAvailableBrands(row.incomingMovementNumber || undefined, row.itemId || undefined);
+                              const brand = brands.find(b => b.id === v);
+                              const brandName = brand?.name ?? v;
+                              // Auto-select invoice if only one matches
+                              let invNum = row.incomingMovementNumber;
+                              let invDate = row.incomingMovementDate;
+                              if (!invNum) {
+                                const matches = getInvoicesForBrand(v, row.itemId || undefined);
+                                if (matches.length === 1) { invNum = matches[0].movementNumber; invDate = matches[0].movementDate; }
+                              }
+                              // Auto-select item if only one matches
+                              let itemId = row.itemId;
+                              let item = row.item;
+                              if (!itemId) {
+                                const matchItems = getItemsForBrand(v, invNum || undefined);
+                                if (matchItems.length === 1) { itemId = matchItems[0].id; item = matchItems[0].arName || matchItems[0].name || ""; }
+                              }
+                              const availQty = invNum && itemId ? getInvoiceItemAvailQty(invNum, itemId, v) : 0;
+                              const invPkg = invNum && itemId ? getInvoiceItemPackage(invNum, itemId) : { packageId: "", packageName: "", unit: "" };
+                              const pkgFromList = invPkg.packageId ? packages.find(p => p.id === invPkg.packageId) : undefined;
+                              const pkgName = invPkg.packageName || pkgFromList?.arName || pkgFromList?.name || pkgFromList?.packageType || "";
+                              const n = itemId ? lookupCustomerNaulage(itemId, item, pkgName || undefined) : null;
+                              updateRow(row.id, {
+                                brandId: v, brandName,
+                                ...(invNum ? { incomingMovementNumber: invNum, incomingMovementDate: invDate } : {}),
+                                ...(itemId && itemId !== row.itemId ? { itemId, item } : {}),
+                                ...(invNum && itemId ? {
+                                  availableQty: availQty, availableUnit: invPkg.unit || pkgName || "",
+                                  packageId: invPkg.packageId, pkg: pkgName,
+                                  naulage: n ? n.naulage : "", naulageUnit: pkgName || (n ? n.naulageUnit : DEFAULT_NAULAGE_UNIT),
+                                } : {}),
+                              });
+                            }}
+                            disabled={!selectedCustomerId}
+                          >
+                            <SelectTrigger className="h-8 text-xs w-28" dir="rtl">
+                              <SelectValue placeholder="الماركة" />
+                            </SelectTrigger>
+                            <SelectContent dir="rtl">
+                              {getAvailableBrands(row.incomingMovementNumber || undefined, row.itemId || undefined).map(b => (
+                                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        {/* Package */}
                         <td className="px-2 py-1.5">
                           <div className="h-8 text-xs px-3 flex items-center rounded-lg border border-gray-200 bg-gray-50 text-gray-700 w-full min-w-[6rem]">
                             {row.pkg || <span className="text-gray-400">—</span>}
@@ -2963,6 +3323,18 @@ function OutgoingTab({
               <button onClick={addRow} className="flex items-center gap-1.5 text-red-600 hover:text-red-700 text-sm font-medium hover:bg-red-50 px-3 py-1.5 rounded">
                 <Plus className="w-4 h-4" />إضافة صنف
               </button>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Notes — after items */}
+      <motion.div variants={anim}>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Textarea placeholder="ملاحظات إضافية..." dir="rtl" className="resize-none h-9 py-1" rows={1} value={notes} onChange={e => setNotes(e.target.value)} />
             </div>
           </CardContent>
         </Card>

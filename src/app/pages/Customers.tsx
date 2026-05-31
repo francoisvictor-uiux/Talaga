@@ -2,7 +2,7 @@
 import { useNavigate } from "react-router";
 import { motion } from "motion/react";
 import {
-  Plus, Search, Eye, Edit, Phone, X, DollarSign,
+  Plus, Search, Eye, EyeOff, Edit, Phone, X, DollarSign,
   LayoutGrid, List, User, MapPin, FileText, Car, Trash2, Users, Printer, Tag, Pencil, Check, TrendingDown,
   SlidersHorizontal, Maximize2, Minimize2,
 } from "lucide-react";
@@ -239,6 +239,7 @@ function CustomerCard({
   c, onView, onEdit,
 }: { c: CustomerView; onView: (c: CustomerView) => void; onEdit: (c: CustomerView) => void }) {
   const grad = avatarGrad(c.name);
+  const [showBalance, setShowBalance] = useState(false);
   return (
     <motion.div variants={anim} className="h-full">
       <Card className="border-0 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden h-full flex flex-col">
@@ -279,11 +280,19 @@ function CustomerCard({
               <span>الأصناف الثلاجةة</span>
               <span className="font-medium text-gray-700">{c.itemsStored} طرد</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <span className="text-gray-500">الرصيد</span>
-              <span className={cn("font-semibold", c.balance >= 0 ? "text-green-600" : "text-red-500")}>
-                {c.balance.toLocaleString("ar-EG")} ج.م
-              </span>
+              <div className="flex items-center gap-1">
+                <span className={cn("font-semibold transition-all", c.balance >= 0 ? "text-green-600" : "text-red-500", !showBalance && "blur-sm select-none")}>
+                  {c.balance.toLocaleString("ar-EG")} ج.م
+                </span>
+                <button
+                  onClick={e => { e.stopPropagation(); setShowBalance(v => !v); }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  {showBalance ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -436,6 +445,12 @@ export function Customers() {
 
   const [view, setView]                     = useState<"grid" | "list">("list");
   const [search, setSearch]                 = useState("");
+  const [revealedBalances, setRevealedBalances] = useState<Set<string>>(new Set());
+  const toggleBalance = (id: string) => setRevealedBalances(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerView | null>(null);
   const [showAdd, setShowAdd]               = useState(false);
 
@@ -1261,25 +1276,35 @@ export function Customers() {
                           </div>
                         </td>
                         <td className="px-4 py-3.5">
-                          <span className={cn("font-semibold", c.balance >= 0 ? "text-green-600" : "text-red-600")}>
-                            {c.balance.toLocaleString("ar-EG")} ج.م
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={cn("font-semibold transition-all", c.balance >= 0 ? "text-green-600" : "text-red-600", !revealedBalances.has(c.id) && "blur-sm select-none")}>
+                              {c.balance.toLocaleString("ar-EG")} ج.م
+                            </span>
+                            <button
+                              onClick={e => { e.stopPropagation(); toggleBalance(c.id); }}
+                              className="text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0"
+                            >
+                              {revealedBalances.has(c.id) ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
                         </td>
                         <td className="px-4 py-3.5 text-gray-600">{c.itemsStored} طرد</td>
                         <td className="px-4 py-3.5 text-gray-600">{c.agent}</td>
                         <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-2">
                             <button
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                               onClick={() => setSelectedCustomer(c)}
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              <Eye className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">بيانات العميل</span>
                             </button>
                             <button
-                              className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                               onClick={() => openEditCustomer(c)}
                             >
-                              <Edit className="w-3.5 h-3.5" />
+                              <Edit className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
                             </button>
                           </div>
                         </td>

@@ -1,7 +1,7 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
-  Plus, Eye, EyeOff, Edit, Shield, List, LayoutGrid, Search, X,
+  Plus, Eye, EyeOff, Edit, Shield, List, LayoutGrid, Search, X, Trash2,
   Phone, Mail, DollarSign, CheckCircle2, XCircle, Clock,
   AlertCircle, Banknote, Calendar, TrendingUp, Users, CreditCard
 } from "lucide-react";
@@ -21,10 +21,11 @@ import { toast } from "sonner";
 import { getAllEmployees, addEmployeeRequest, editEmployeeRequest, type BackendEmployee } from "../services/employeeService";
 import { getJobTitlesDDL, addJobTitle as apiAddJobTitle, type JobTitleOption } from "../services/jobTitleService";
 import {
-  getSalaries, addSalary, markSalaryPaid, addSalaryBonus, type BackendSalary,
+  getSalaries, addSalary, editSalary, markSalaryPaid, addSalaryBonus, type BackendSalary,
+  getDeductions, addDeduction, editDeduction, deleteDeduction, type BackendDeduction,
   getLeaves, addLeave, setLeaveStatus, type BackendLeave,
-  getAdvances, addAdvance, type BackendAdvance,
-  getAbsences, addAbsence, type BackendAbsence,
+  getAdvances, addAdvance, editAdvance, type BackendAdvance,
+  getAbsences, addAbsence, editAbsence, type BackendAbsence,
 } from "../services/hrService";
 import { validatePhoneOptional, normalizePhone, PHONE_PLACEHOLDER } from "../utils/phone";
 
@@ -36,7 +37,7 @@ const ROLE_OPTIONS = [
   { code: "Viewer",     label: "مشاهدة فقط" },
 ];
 
-type EmployeeMini = { id: string; name: string };
+type EmployeeMini = { id: string; name: string; salary: number; status: string };
 
 const roleColors: Record<string, string> = {
   "مدير النظام": "bg-red-100 text-red-700 border-red-200",
@@ -55,41 +56,95 @@ const cardItem = { hidden: { opacity: 0, scale: 0.95 }, show: { opacity: 1, scal
 /* ──────────────────────────────────────────
    SALARIES TAB
 ────────────────────────────────────────── */
+/* Working days per month used for daily rate calculation */
+const WORKING_DAYS = 30;
+const DEDUCTION_TYPES = ["غياب", "تأخير", "تأديبي", "خصم تأمين", "أخرى"] as const;
+
 function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
   const [filterMonth, setFilterMonth] = useState(() => {
     const n = new Date();
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
   });
-  const [rows, setRows] = useState<BackendSalary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [showBulkPay, setShowBulkPay] = useState(false);
+  const [rows, setRows]             = useState<BackendSalary[]>([]);
+  const [deductions, setDeductions] = useState<BackendDeduction[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [selectedIds, setSelectedIds]     = useState<string[]>([]);
+  const [showBulkPay, setShowBulkPay]     = useState(false);
   const [showBulkBonus, setShowBulkBonus] = useState(false);
-  const [bonusAmount, setBonusAmount] = useState("");
-  const [showAddSalary, setShowAddSalary] = useState(false);
-  const [addForm, setAddForm] = useState({ employeeId: "", month: "", baseSalary: "", bonus: "0", deductions: "0", notes: "" });
+  const [bonusAmount, setBonusAmount]     = useState("");
+
+  // Edit salary record dialog (bonuses, deductions/insurance, notes)
+  const [editRec, setEditRec]   = useState<BackendSalary | null>(null);
+  const [editForm, setEditForm] = useState({ bonuses: "", deductions: "", notes: "" });
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Deductions drawer: show/add/edit/delete deduction records for a salary row
+  const [deductRec, setDeductRec]     = useState<BackendSalary | null>(null);   // salary row whose deductions we're managing
+  const [editDeductRow, setEditDeductRow] = useState<BackendDeduction | null>(null);
+  const [deductForm, setDeductForm]   = useState({ days: "", amount: "", type: "أخرى", reason: "" });
+  const [deductSaving, setDeductSaving] = useState(false);
 
   const [year, month] = filterMonth.split("-").map(Number);
+
+  const loadDeductions = useCallback(async () => {
+    try { setDeductions(await getDeductions(year, month)); }
+    catch { setDeductions([]); } // silent — endpoint may not exist yet
+  }, [year, month]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await getSalaries(year, month);
-      setRows(list);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "فشل تحميل المرتبات");
-    } finally { setLoading(false); }
-  }, [year, month]);
+      setRows(await getSalaries(year, month));
+      void loadDeductions();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل تحميل المرتبات"); }
+    finally { setLoading(false); }
+  }, [year, month, loadDeductions]);
 
-  useEffect(() => { load(); }, [load]);
+  // Auto-generate missing salary records for active employees each month
+  const autoGenerate = useCallback(async (existing: BackendSalary[]) => {
+    const active = employees.filter(e => e.status === "active" && e.salary > 0);
+    if (!active.length) return;
+    const has = new Set(existing.map(r => r.employeeId));
+    const missing = active.filter(e => !has.has(e.id));
+    if (!missing.length) return;
+    setGenerating(true);
+    try {
+      await Promise.all(missing.map(e =>
+        addSalary({ employeeId: e.id, year, month, baseSalary: e.salary })
+      ));
+      setRows(await getSalaries(year, month));
+    } catch { /* silent */ }
+    finally { setGenerating(false); }
+  }, [employees, year, month]);
 
-  const pendingRows = rows.filter(r => r.status === "معلق");
-  const totalPaid = rows.reduce((s, r) => s + (r.status === "مدفوع" ? r.netSalary : 0), 0);
-  const totalPending = pendingRows.reduce((s, r) => s + r.netSalary, 0);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getSalaries(year, month)
+      .then(list => {
+        if (cancelled) return;
+        setRows(list);
+        void autoGenerate(list);
+        void loadDeductions();
+      })
+      .catch(err => toast.error(err instanceof Error ? err.message : "فشل تحميل المرتبات"))
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [year, month, autoGenerate, loadDeductions]);
+
+  // Helper: sum of deduction amounts for a given employeeId this month
+  const empDeductTotal = (employeeId: string) =>
+    deductions.filter(d => d.employeeId === employeeId).reduce((s, d) => s + d.amount, 0);
+
+  const pendingRows    = rows.filter(r => r.status === "معلق");
+  const totalPaid      = rows.reduce((s, r) => s + (r.status === "مدفوع" ? r.netSalary : 0), 0);
+  const totalPending   = pendingRows.reduce((s, r) => s + r.netSalary, 0);
+  const totalDeductAll = deductions.reduce((s, d) => s + d.amount, 0);
+  const dailyRate      = (rec: BackendSalary) => rec.baseSalary / WORKING_DAYS;
 
   const toggleSelect = (id: string) =>
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
   const toggleAll = () => {
     const ids = pendingRows.map(r => r.id);
     setSelectedIds(prev => ids.every(id => prev.includes(id)) ? [] : ids);
@@ -99,11 +154,8 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
     try {
       await Promise.all(selectedIds.map(id => markSalaryPaid(id)));
       toast.success(`تم صرف ${selectedIds.length} راتب بنجاح`);
-      setSelectedIds([]); setShowBulkPay(false);
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "فشل صرف المرتبات");
-    }
+      setSelectedIds([]); setShowBulkPay(false); await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل صرف المرتبات"); }
   };
 
   const handleBulkBonus = async () => {
@@ -111,43 +163,110 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
     if (!amount || amount <= 0) { toast.error("أدخل مبلغ صحيح"); return; }
     try {
       await Promise.all(selectedIds.map(id => addSalaryBonus(id, amount)));
-      toast.success(`تمت إضافة إكرامية ${amount.toLocaleString()} ج.م لـ ${selectedIds.length} موظفين`);
-      setBonusAmount(""); setSelectedIds([]); setShowBulkBonus(false);
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "فشل إضافة الإكرامية");
-    }
+      toast.success(`تمت إضافة إكرامية ${amount.toLocaleString()} ج.م`);
+      setBonusAmount(""); setSelectedIds([]); setShowBulkBonus(false); await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل إضافة الإكرامية"); }
   };
 
-  const handleAddSalary = async () => {
-    if (!addForm.employeeId || !addForm.month || !addForm.baseSalary) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
-    const [y, m] = addForm.month.split("-").map(Number);
+  // ── Edit salary record (bonuses / deductions-insurance / notes) ──
+  const openEdit = (rec: BackendSalary) => {
+    setEditRec(rec);
+    setEditForm({ bonuses: String(rec.bonuses ?? ""), deductions: String(rec.deductions ?? ""), notes: rec.notes ?? "" });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editRec) return;
+    setEditSaving(true);
     try {
-      await addSalary({
-        employeeId: addForm.employeeId,
-        year: y, month: m,
-        baseSalary: Number(addForm.baseSalary),
-        bonuses: Number(addForm.bonus) || 0,
-        deductions: Number(addForm.deductions) || 0,
-        notes: addForm.notes || undefined,
+      await editSalary({
+        id: editRec.id, employeeId: editRec.employeeId,
+        year: editRec.year, month: editRec.month, baseSalary: editRec.baseSalary,
+        bonuses:    Number(editForm.bonuses)    || undefined,
+        deductions: Number(editForm.deductions) || undefined,
+        notes:      editForm.notes || undefined,
+        isActive: true,
       });
-      toast.success("تمت إضافة سجل الراتب");
-      setShowAddSalary(false);
-      setAddForm({ employeeId: "", month: "", baseSalary: "", bonus: "0", deductions: "0", notes: "" });
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "فشل إضافة المرتب");
-    }
+      toast.success(`تم تحديث راتب ${editRec.employeeName ?? ""}`);
+      setEditRec(null); await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل حفظ التعديلات"); }
+    finally { setEditSaving(false); }
+  };
+
+  // ── Deductions drawer ──
+  const openDeductions = (rec: BackendSalary) => {
+    setDeductRec(rec);
+    setEditDeductRow(null);
+    setDeductForm({ days: "", amount: "", type: "أخرى", reason: "" });
+  };
+
+  const openEditDeduct = (d: BackendDeduction) => {
+    setEditDeductRow(d);
+    setDeductForm({ days: String(d.days ?? ""), amount: String(d.amount), type: d.deductionType, reason: d.reason ?? "" });
+  };
+
+  const resetDeductForm = () => {
+    setEditDeductRow(null);
+    setDeductForm({ days: "", amount: "", type: "أخرى", reason: "" });
+  };
+
+  // Computed amount from days
+  const computedDeductAmt = deductRec && deductForm.days && Number(deductForm.days) > 0
+    ? Math.round(dailyRate(deductRec) * Number(deductForm.days) * 100) / 100
+    : null;
+
+  const handleSaveDeduct = async () => {
+    if (!deductRec) return;
+    const finalAmount = computedDeductAmt ?? Number(deductForm.amount);
+    if (!finalAmount || finalAmount <= 0) { toast.error("أدخل عدد الأيام أو المبلغ"); return; }
+    setDeductSaving(true);
+    try {
+      if (editDeductRow) {
+        await editDeduction({
+          id: editDeductRow.id,
+          employeeId: deductRec.employeeId,
+          year: deductRec.year, month: deductRec.month,
+          days: deductForm.days ? Number(deductForm.days) : undefined,
+          amount: finalAmount,
+          deductionType: deductForm.type,
+          reason: deductForm.reason || undefined,
+          isActive: true,
+        });
+        toast.success("تم تعديل الخصم");
+      } else {
+        await addDeduction({
+          employeeId: deductRec.employeeId,
+          year: deductRec.year, month: deductRec.month,
+          days: deductForm.days ? Number(deductForm.days) : undefined,
+          amount: finalAmount,
+          deductionType: deductForm.type,
+          reason: deductForm.reason || undefined,
+        });
+        toast.success("تم إضافة الخصم");
+      }
+      resetDeductForm();
+      await loadDeductions();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل حفظ الخصم"); }
+    finally { setDeductSaving(false); }
+  };
+
+  const handleDeleteDeduct = async (d: BackendDeduction) => {
+    try {
+      await deleteDeduction(d.id);
+      toast.success("تم حذف الخصم");
+      await loadDeductions();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل الحذف"); }
   };
 
   return (
     <div className="space-y-4">
+
+      {/* ── Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "إجمالي المدفوع", value: `${totalPaid.toLocaleString()} ج.م`, icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
-          { label: "في الانتظار", value: `${totalPending.toLocaleString()} ج.م`, icon: Clock, color: "text-orange-600", bg: "bg-orange-50" },
-          { label: "عدد السجلات", value: rows.length, icon: Users, color: "text-blue-600", bg: "bg-blue-50" },
-          { label: "معلق", value: pendingRows.length, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50" },
+          { label: "إجمالي المدفوع",  value: `${totalPaid.toLocaleString()} ج.م`,      icon: CheckCircle2, color: "text-green-600",  bg: "bg-green-50"  },
+          { label: "في الانتظار",      value: `${totalPending.toLocaleString()} ج.م`,   icon: Clock,        color: "text-orange-600", bg: "bg-orange-50" },
+          { label: "إجمالي الخصومات", value: `${totalDeductAll.toLocaleString()} ج.م`, icon: AlertCircle,  color: "text-red-600",    bg: "bg-red-50"    },
+          { label: "عدد السجلات",      value: rows.length,                              icon: Users,        color: "text-blue-600",   bg: "bg-blue-50"   },
         ].map(k => (
           <Card key={k.label} className="border-0 shadow-sm">
             <CardContent className="p-4 flex items-center gap-3">
@@ -161,80 +280,130 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
         ))}
       </div>
 
+      {/* ── Toolbar ── */}
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <div className="flex items-center gap-2">
           <Label className="text-sm">الشهر:</Label>
           <Input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-40 border-gray-200" />
+          {generating && <span className="text-xs text-blue-500 animate-pulse">جاري إنشاء سجلات الشهر...</span>}
         </div>
-        <div className="flex items-center gap-2">
-          {selectedIds.length > 0 && (
-            <>
-              <Button size="sm" onClick={() => setShowBulkPay(true)} className="bg-green-600 hover:bg-green-700 text-white gap-1">
-                <Banknote className="w-4 h-4" />صرف مرتبات ({selectedIds.length})
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setShowBulkBonus(true)} className="border-yellow-400 text-yellow-700 hover:bg-yellow-50 gap-1">
-                <TrendingUp className="w-4 h-4" />إضافة إكرامية ({selectedIds.length})
-              </Button>
-            </>
-          )}
-          <Button size="sm" onClick={() => setShowAddSalary(true)} className="bg-blue-600 hover:bg-blue-700 text-white gap-1">
-            <Plus className="w-4 h-4" />إضافة راتب
-          </Button>
-        </div>
+        {selectedIds.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setShowBulkPay(true)} className="bg-green-600 hover:bg-green-700 text-white gap-1">
+              <Banknote className="w-4 h-4" />صرف مرتبات ({selectedIds.length})
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowBulkBonus(true)} className="border-yellow-400 text-yellow-700 hover:bg-yellow-50 gap-1">
+              <TrendingUp className="w-4 h-4" />إضافة إكرامية ({selectedIds.length})
+            </Button>
+          </div>
+        )}
       </div>
 
+      {/* ── Table ── */}
       <Card className="border-0 shadow-sm overflow-hidden">
         <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b">
-                <th className="px-3 py-3 text-center w-10">
-                  <Checkbox
-                    checked={pendingRows.length > 0 && pendingRows.every(r => selectedIds.includes(r.id))}
-                    onCheckedChange={toggleAll}
-                  />
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الموظف</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الشهر</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الأساسي</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الإكرامية</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الاستقطاع</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الصافي</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الحالة</th>
-                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">ملاحظات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={9} className="text-center py-10 text-gray-400">جاري التحميل...</td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-10 text-gray-400">لا توجد سجلات لهذا الشهر</td></tr>
-              ) : rows.map((rec, idx) => (
-                <tr key={rec.id} className={cn("border-b hover:bg-gray-50/50 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
-                  <td className="px-3 py-3 text-center">
-                    {rec.status === "معلق" ? (
-                      <Checkbox checked={selectedIds.includes(rec.id)} onCheckedChange={() => toggleSelect(rec.id)} />
-                    ) : <span />}
-                  </td>
-                  <td className="px-4 py-3.5 font-medium text-gray-800">{rec.employeeName ?? "—"}</td>
-                  <td className="px-4 py-3.5 text-gray-600">{rec.year}-{String(rec.month).padStart(2, "0")}</td>
-                  <td className="px-4 py-3.5 text-gray-700">{rec.baseSalary.toLocaleString()}</td>
-                  <td className="px-4 py-3.5 text-yellow-600">{(rec.bonuses ?? 0) > 0 ? `+${(rec.bonuses ?? 0).toLocaleString()}` : "—"}</td>
-                  <td className="px-4 py-3.5 text-red-500">{(rec.deductions ?? 0) > 0 ? `-${(rec.deductions ?? 0).toLocaleString()}` : "—"}</td>
-                  <td className="px-4 py-3.5 text-green-700 font-semibold">{rec.netSalary.toLocaleString()} ج.م</td>
-                  <td className="px-4 py-3.5">
-                    <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium",
-                      rec.status === "مدفوع" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-                    )}>{rec.status}</span>
-                  </td>
-                  <td className="px-4 py-3.5 text-gray-500 text-xs">{rec.notes || "—"}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[900px]">
+              <thead>
+                <tr className="bg-gray-50 border-b">
+                  <th className="px-3 py-3 text-center w-10">
+                    <Checkbox checked={pendingRows.length > 0 && pendingRows.every(r => selectedIds.includes(r.id))} onCheckedChange={toggleAll} />
+                  </th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الموظف</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الشهر</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الأساسي</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">سعر اليوم</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-yellow-600">الإكرامية</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 whitespace-nowrap">الاستقطاعات<br/><span className="font-normal text-gray-400 text-[10px]">(تأمين/ضريبة)</span></th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-orange-600 whitespace-nowrap">خصم سلف<br/><span className="font-normal text-gray-400 text-[10px]">(تلقائي)</span></th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-orange-600 whitespace-nowrap">خصم غياب<br/><span className="font-normal text-gray-400 text-[10px]">(تلقائي)</span></th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-red-600 whitespace-nowrap">الخصومات<br/><span className="font-normal text-gray-400 text-[10px]">(تأديبية)</span></th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-green-600">الصافي الفعلي</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الحالة</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">ملاحظات</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">إجراء</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={14} className="text-center py-10 text-gray-400">جاري التحميل...</td></tr>
+                ) : rows.length === 0 ? (
+                  <tr><td colSpan={14} className="text-center py-10 text-gray-400">لا توجد سجلات لهذا الشهر</td></tr>
+                ) : rows.map((rec, idx) => (
+                  <tr key={rec.id} className={cn("border-b hover:bg-gray-50/50 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
+                    <td className="px-3 py-3 text-center">
+                      {rec.status === "معلق"
+                        ? <Checkbox checked={selectedIds.includes(rec.id)} onCheckedChange={() => toggleSelect(rec.id)} />
+                        : <span />}
+                    </td>
+                    <td className="px-4 py-3.5 font-medium text-gray-800">{rec.employeeName ?? "—"}</td>
+                    <td className="px-4 py-3.5 text-gray-600">{rec.year}-{String(rec.month).padStart(2, "0")}</td>
+                    <td className="px-4 py-3.5 text-gray-700">{rec.baseSalary.toLocaleString()}</td>
+                    <td className="px-4 py-3.5 text-blue-600 text-xs">{dailyRate(rec).toFixed(1)} ج.م</td>
+                    <td className="px-4 py-3.5 text-yellow-600">{(rec.bonuses ?? 0) > 0 ? `+${(rec.bonuses ?? 0).toLocaleString()}` : "—"}</td>
+                    <td className="px-4 py-3.5 text-gray-500">{(rec.deductions ?? 0) > 0 ? `-${(rec.deductions ?? 0).toLocaleString()} ج.م` : "—"}</td>
+                    <td className="px-4 py-3.5 text-orange-600 text-xs font-medium">
+                      {(rec.advancesDeducted ?? 0) > 0 ? `-${(rec.advancesDeducted ?? 0).toLocaleString()} ج.م` : "—"}
+                    </td>
+                    <td className="px-4 py-3.5 text-orange-600 text-xs font-medium">
+                      {(rec.absenceDeductions ?? 0) > 0 ? `-${(rec.absenceDeductions ?? 0).toLocaleString()} ج.م` : "—"}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {(() => {
+                        const total = rec.employeeDeductionsTotal ?? empDeductTotal(rec.employeeId);
+                        const count = deductions.filter(d => d.employeeId === rec.employeeId).length;
+                        return (
+                          <button
+                            onClick={() => openDeductions(rec)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs transition-colors",
+                              total > 0
+                                ? "text-red-600 border-red-200 bg-red-50 hover:bg-red-100 font-semibold"
+                                : "text-gray-400 border-gray-200 hover:bg-gray-50"
+                            )}
+                          >
+                            {total > 0 ? `-${total.toLocaleString()} ج.م` : "لا يوجد"}
+                            {count > 0 && <span className="bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">{count}</span>}
+                          </button>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-green-700 font-bold text-sm">
+                          {(rec.actualNetSalary ?? rec.netSalary).toLocaleString()} ج.م
+                        </span>
+                        {(rec.employeeDeductionsTotal ?? 0) > 0 && (
+                          <span className="text-[10px] text-gray-400">
+                            قبل التأديبي: {rec.netSalary.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium",
+                        rec.status === "مدفوع" ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+                      )}>{rec.status}</span>
+                    </td>
+                    <td className="px-4 py-3.5 text-gray-500 text-xs max-w-[120px] truncate">{rec.notes || "—"}</td>
+                    <td className="px-4 py-3.5">
+                      <button
+                        onClick={() => openEdit(rec)}
+                        className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <Edit className="w-5 h-5" />
+                        <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
 
+      {/* ── Bulk Pay ── */}
       <Dialog open={showBulkPay} onOpenChange={setShowBulkPay}>
         <DialogContent dir="rtl" className="max-w-sm bg-white">
           <DialogHeader><DialogTitle>تأكيد صرف المرتبات</DialogTitle></DialogHeader>
@@ -249,6 +418,7 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
         </DialogContent>
       </Dialog>
 
+      {/* ── Bulk Bonus ── */}
       <Dialog open={showBulkBonus} onOpenChange={setShowBulkBonus}>
         <DialogContent dir="rtl" className="max-w-sm bg-white">
           <DialogHeader><DialogTitle>إضافة إكرامية</DialogTitle></DialogHeader>
@@ -263,47 +433,392 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showAddSalary} onOpenChange={setShowAddSalary}>
+      {/* ── Edit Salary Record Dialog (bonuses / insurance / notes) ── */}
+      <Dialog open={!!editRec} onOpenChange={() => setEditRec(null)}>
+        <DialogContent dir="rtl" className="max-w-sm bg-white">
+          <DialogHeader><DialogTitle>تعديل راتب — {editRec?.employeeName}</DialogTitle></DialogHeader>
+          {editRec && (
+            <div className="space-y-3 py-1">
+              <div className="grid grid-cols-2 gap-2 text-center bg-gray-50 rounded-xl p-3">
+                <div><p className="text-[10px] text-gray-400">الراتب الأساسي</p><p className="font-bold text-gray-800">{editRec.baseSalary.toLocaleString()} ج.م</p></div>
+                <div><p className="text-[10px] text-gray-400">سعر اليوم</p><p className="font-bold text-blue-600">{dailyRate(editRec).toFixed(1)} ج.م</p></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-yellow-700">الإكرامية (ج.م)</Label>
+                  <Input type="number" dir="rtl" placeholder="0" value={editForm.bonuses}
+                    onChange={e => setEditForm(f => ({ ...f, bonuses: e.target.value }))} className="border-yellow-200 bg-yellow-50/30" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>الاستقطاعات — تأمين/ضريبة</Label>
+                  <Input type="number" dir="rtl" placeholder="0" value={editForm.deductions}
+                    onChange={e => setEditForm(f => ({ ...f, deductions: e.target.value }))} className="border-gray-200" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>ملاحظات</Label>
+                <Input dir="rtl" placeholder="ملاحظات..." value={editForm.notes}
+                  onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} className="border-gray-200" />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2 mt-2">
+            <Button onClick={handleSaveEdit} disabled={editSaving} className="bg-[#155dfc] hover:bg-blue-700 text-white">
+              {editSaving ? "جاري الحفظ..." : "حفظ"}
+            </Button>
+            <Button variant="outline" onClick={() => setEditRec(null)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Deductions Manager Dialog ── */}
+      <Dialog open={!!deductRec} onOpenChange={() => { setDeductRec(null); resetDeductForm(); }}>
+        <DialogContent dir="rtl" className="max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle>سجلات الخصم — {deductRec?.employeeName}</DialogTitle>
+          </DialogHeader>
+          {deductRec && (
+            <div className="space-y-4 py-1">
+
+              {/* Info */}
+              <div className="grid grid-cols-3 gap-2 text-center bg-gray-50 rounded-xl p-3 text-sm">
+                <div><p className="text-[10px] text-gray-400">الراتب الأساسي</p><p className="font-bold">{deductRec.baseSalary.toLocaleString()} ج.م</p></div>
+                <div><p className="text-[10px] text-gray-400">سعر اليوم</p><p className="font-bold text-blue-600">{dailyRate(deductRec).toFixed(1)} ج.م</p></div>
+                <div><p className="text-[10px] text-gray-400">إجمالي الخصم</p><p className="font-bold text-red-600">{empDeductTotal(deductRec.employeeId).toLocaleString()} ج.م</p></div>
+              </div>
+
+              {/* Existing records */}
+              {deductions.filter(d => d.employeeId === deductRec.employeeId).length > 0 && (
+                <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        {["النوع","الأيام","المبلغ","السبب","إجراء"].map(h => (
+                          <th key={h} className="text-right px-3 py-2 font-medium text-gray-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deductions.filter(d => d.employeeId === deductRec.employeeId).map(d => (
+                        <tr key={d.id} className="border-b hover:bg-gray-50/50">
+                          <td className="px-3 py-2">
+                            <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px]">{d.deductionType}</span>
+                          </td>
+                          <td className="px-3 py-2 text-gray-600">{d.days ?? "—"}</td>
+                          <td className="px-3 py-2 font-semibold text-red-600">-{d.amount.toLocaleString()} ج.م</td>
+                          <td className="px-3 py-2 text-gray-500 max-w-[120px] truncate">{d.reason || "—"}</td>
+                          <td className="px-3 py-2">
+                            <div className="flex gap-1">
+                              <button onClick={() => openEditDeduct(d)} className="p-1 text-gray-500 hover:bg-gray-100 rounded transition-colors"><Edit className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => handleDeleteDeduct(d)} className="p-1 text-red-400 hover:bg-red-50 rounded transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Add / Edit form */}
+              <div className={cn("border rounded-xl p-3 space-y-3", editDeductRow ? "border-blue-200 bg-blue-50/20" : "border-dashed border-red-200 bg-red-50/10")}>
+                <p className="text-xs font-semibold text-gray-600">
+                  {editDeductRow ? `تعديل خصم: ${editDeductRow.deductionType}` : "إضافة خصم جديد"}
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">نوع الخصم</Label>
+                    <Select value={deductForm.type} onValueChange={v => setDeductForm(f => ({ ...f, type: v }))}>
+                      <SelectTrigger dir="rtl" className="h-8 text-xs border-gray-200"><SelectValue /></SelectTrigger>
+                      <SelectContent dir="rtl">
+                        {DEDUCTION_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">عدد الأيام <span className="text-gray-400">(اختياري)</span></Label>
+                    <Input type="number" dir="rtl" min="0" step="0.5" placeholder="0.5"
+                      value={deductForm.days}
+                      onChange={e => {
+                        const days = e.target.value;
+                        const amt = deductRec ? String(Math.round(dailyRate(deductRec) * (Number(days) || 0) * 100) / 100) : "";
+                        setDeductForm(f => ({ ...f, days, amount: days ? amt : f.amount }));
+                      }}
+                      className="h-8 text-xs border-gray-200" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">المبلغ (ج.م) <span className="text-red-500">*</span></Label>
+                    <Input type="number" dir="rtl" min="0" placeholder="0"
+                      value={deductForm.amount}
+                      onChange={e => setDeductForm(f => ({ ...f, amount: e.target.value, days: "" }))}
+                      className="h-8 text-xs border-gray-200" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">السبب</Label>
+                    <Input dir="rtl" placeholder="سبب الخصم" value={deductForm.reason}
+                      onChange={e => setDeductForm(f => ({ ...f, reason: e.target.value }))}
+                      className="h-8 text-xs border-gray-200" />
+                  </div>
+                </div>
+                {computedDeductAmt !== null && computedDeductAmt > 0 && (
+                  <div className="flex items-center justify-between bg-red-100 rounded-lg px-3 py-1.5 text-xs">
+                    <span className="text-red-700">{deductForm.days} يوم × {dailyRate(deductRec).toFixed(1)} ج.م</span>
+                    <span className="font-bold text-red-700">{computedDeductAmt.toLocaleString()} ج.م</span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSaveDeduct} disabled={deductSaving}
+                    className={cn("flex-1 text-white", editDeductRow ? "bg-blue-600 hover:bg-blue-700" : "bg-red-600 hover:bg-red-700")}>
+                    {deductSaving ? "..." : editDeductRow ? "حفظ التعديل" : "إضافة الخصم"}
+                  </Button>
+                  {editDeductRow && (
+                    <Button size="sm" variant="outline" onClick={resetDeductForm}>إلغاء</Button>
+                  )}
+                </div>
+              </div>
+
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+    </div>
+  );
+}
+/* ──────────────────────────────────────────
+   DEDUCTIONS TAB  (الخصومات)
+────────────────────────────────────────── */
+function DeductionsTab({ employees }: { employees: EmployeeMini[] }) {
+  const [filterMonth, setFilterMonth] = useState(() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [deductions, setDeductions] = useState<BackendDeduction[]>([]);
+  const [loading, setLoading]       = useState(false);
+
+  // Add / Edit state
+  const [showAdd, setShowAdd]           = useState(false);
+  const [editRow, setEditRow]           = useState<BackendDeduction | null>(null);
+  const [form, setForm]                 = useState({ employeeId: "", days: "", amount: "", type: "أخرى", reason: "" });
+  const [saving, setSaving]             = useState(false);
+
+  const [year, month] = filterMonth.split("-").map(Number);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setDeductions(await getDeductions(year, month)); }
+    catch { setDeductions([]); }
+    finally { setLoading(false); }
+  }, [year, month]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const dailyRateOf = (empId: string) => {
+    const emp = employees.find(e => e.id === empId);
+    return emp ? emp.salary / WORKING_DAYS : 0;
+  };
+
+  const computedAmt = form.employeeId && form.days && Number(form.days) > 0
+    ? Math.round(dailyRateOf(form.employeeId) * Number(form.days) * 100) / 100
+    : null;
+
+  const openAdd = () => {
+    setEditRow(null);
+    setForm({ employeeId: "", days: "", amount: "", type: "أخرى", reason: "" });
+    setShowAdd(true);
+  };
+
+  const openEdit = (d: BackendDeduction) => {
+    setEditRow(d);
+    setForm({ employeeId: d.employeeId, days: String(d.days ?? ""), amount: String(d.amount), type: d.deductionType, reason: d.reason ?? "" });
+    setShowAdd(true);
+  };
+
+  const handleSave = async () => {
+    const finalAmt = computedAmt ?? Number(form.amount);
+    if (!form.employeeId) { toast.error("اختر الموظف"); return; }
+    if (!finalAmt || finalAmt <= 0) { toast.error("أدخل الأيام أو المبلغ"); return; }
+    setSaving(true);
+    try {
+      if (editRow) {
+        await editDeduction({ id: editRow.id, employeeId: form.employeeId, year, month, days: form.days ? Number(form.days) : undefined, amount: finalAmt, deductionType: form.type, reason: form.reason || undefined, isActive: true });
+        toast.success("تم تعديل الخصم");
+      } else {
+        await addDeduction({ employeeId: form.employeeId, year, month, days: form.days ? Number(form.days) : undefined, amount: finalAmt, deductionType: form.type, reason: form.reason || undefined });
+        toast.success("تم إضافة الخصم");
+      }
+      setShowAdd(false);
+      await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل الحفظ"); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (d: BackendDeduction) => {
+    try { await deleteDeduction(d.id); toast.success("تم الحذف"); await load(); }
+    catch (err) { toast.error(err instanceof Error ? err.message : "فشل الحذف"); }
+  };
+
+  const totalAll = deductions.reduce((s, d) => s + d.amount, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Label className="text-sm">الشهر:</Label>
+          <Input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="w-40 border-gray-200" />
+          {deductions.length > 0 && (
+            <span className="text-xs text-red-600 font-medium bg-red-50 border border-red-100 px-2 py-1 rounded-lg">
+              إجمالي الخصومات: {totalAll.toLocaleString()} ج.م
+            </span>
+          )}
+        </div>
+        <Button size="sm" onClick={openAdd} className="bg-red-600 hover:bg-red-700 text-white gap-1">
+          <Plus className="w-3.5 h-3.5" />إضافة خصم
+        </Button>
+      </div>
+
+      {/* Table */}
+      <Card className="border-0 shadow-sm overflow-hidden">
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b">
+                {["الموظف","نوع الخصم","الأيام","المبلغ","سعر اليوم","السبب","إجراء"].map(h => (
+                  <th key={h} className="text-right px-4 py-3 text-xs font-medium text-gray-500">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={7} className="text-center py-10 text-gray-400">جاري التحميل...</td></tr>
+              ) : deductions.length === 0 ? (
+                <tr><td colSpan={7} className="text-center py-10 text-gray-400">لا توجد خصومات لهذا الشهر</td></tr>
+              ) : deductions.map((d, idx) => (
+                <tr key={d.id} className={cn("border-b hover:bg-gray-50/50 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
+                  <td className="px-4 py-3.5 font-medium text-gray-800">{d.employeeName ?? "—"}</td>
+                  <td className="px-4 py-3.5">
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700">{d.deductionType}</span>
+                  </td>
+                  <td className="px-4 py-3.5 text-gray-600">{d.days ?? "—"}</td>
+                  <td className="px-4 py-3.5 font-semibold text-red-600">-{d.amount.toLocaleString()} ج.م</td>
+                  <td className="px-4 py-3.5 text-blue-600 text-xs">{dailyRateOf(d.employeeId).toFixed(1)} ج.م</td>
+                  <td className="px-4 py-3.5 text-gray-500 text-xs">{d.reason || "—"}</td>
+                  <td className="px-4 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => openEdit(d)} className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+                        <Edit className="w-5 h-5" />
+                        <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
+                      </button>
+                      <button onClick={() => handleDelete(d)} className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                        <Trash2 className="w-5 h-5" />
+                        <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {/* Add / Edit Dialog */}
+      <Dialog open={showAdd} onOpenChange={o => { setShowAdd(o); if (!o) setEditRow(null); }}>
         <DialogContent dir="rtl" className="max-w-md bg-white">
-          <DialogHeader><DialogTitle>إضافة سجل راتب</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
-            <div className="col-span-2 space-y-1.5">
+          <DialogHeader>
+            <DialogTitle>{editRow ? "تعديل خصم" : "إضافة خصم جديد"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            {/* Employee */}
+            <div className="space-y-1.5">
               <Label>الموظف <span className="text-red-500">*</span></Label>
-              <Select value={addForm.employeeId} onValueChange={v => setAddForm({ ...addForm, employeeId: v })}>
+              <Select value={form.employeeId} onValueChange={v => setForm(f => ({ ...f, employeeId: v, days: "", amount: "" }))}>
                 <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="اختر موظفاً" /></SelectTrigger>
                 <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label>الشهر <span className="text-red-500">*</span></Label>
-              <Input type="month" value={addForm.month} onChange={e => setAddForm({ ...addForm, month: e.target.value })} className="border-gray-200" />
+
+            {/* Info bar when employee selected */}
+            {form.employeeId && (
+              <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-xs">
+                <span className="text-gray-500">الراتب الأساسي:</span>
+                <span className="font-semibold text-gray-800">{(employees.find(e => e.id === form.employeeId)?.salary ?? 0).toLocaleString()} ج.م</span>
+                <span className="text-gray-300">|</span>
+                <span className="text-gray-500">سعر اليوم:</span>
+                <span className="font-semibold text-blue-600">{dailyRateOf(form.employeeId).toFixed(1)} ج.م</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              {/* Type */}
+              <div className="space-y-1.5">
+                <Label>نوع الخصم</Label>
+                <Select value={form.type} onValueChange={v => setForm(f => ({ ...f, type: v }))}>
+                  <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {DEDUCTION_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Days */}
+              <div className="space-y-1.5">
+                <Label>عدد الأيام <span className="text-gray-400 text-[11px]">(اختياري)</span></Label>
+                <Input type="number" dir="rtl" min="0" step="0.5" placeholder="0.5"
+                  value={form.days}
+                  onChange={e => {
+                    const days = e.target.value;
+                    const amt  = form.employeeId
+                      ? String(Math.round(dailyRateOf(form.employeeId) * (Number(days) || 0) * 100) / 100)
+                      : "";
+                    setForm(f => ({ ...f, days, amount: days ? amt : f.amount }));
+                  }}
+                  className="border-gray-200" />
+              </div>
+
+              {/* Amount */}
+              <div className="space-y-1.5">
+                <Label>المبلغ (ج.م) <span className="text-red-500">*</span></Label>
+                <Input type="number" dir="rtl" min="0" placeholder="0"
+                  value={form.amount}
+                  onChange={e => setForm(f => ({ ...f, amount: e.target.value, days: "" }))}
+                  className="border-gray-200" />
+              </div>
+
+              {/* Reason */}
+              <div className="space-y-1.5">
+                <Label>السبب</Label>
+                <Input dir="rtl" placeholder="مثال: غياب بدون إذن"
+                  value={form.reason}
+                  onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+                  className="border-gray-200" />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>الأساسي <span className="text-red-500">*</span></Label>
-              <Input type="number" value={addForm.baseSalary} onChange={e => setAddForm({ ...addForm, baseSalary: e.target.value })} dir="rtl" className="border-gray-200" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>إكرامية</Label>
-              <Input type="number" value={addForm.bonus} onChange={e => setAddForm({ ...addForm, bonus: e.target.value })} dir="rtl" className="border-gray-200" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>استقطاع</Label>
-              <Input type="number" value={addForm.deductions} onChange={e => setAddForm({ ...addForm, deductions: e.target.value })} dir="rtl" className="border-gray-200" />
-            </div>
-            <div className="col-span-2 space-y-1.5">
-              <Label>ملاحظات</Label>
-              <Input dir="rtl" value={addForm.notes} onChange={e => setAddForm({ ...addForm, notes: e.target.value })} className="border-gray-200" />
-            </div>
+
+            {/* Live amount preview */}
+            {computedAmt !== null && computedAmt > 0 && (
+              <div className="flex items-center justify-between bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">
+                <span className="text-sm text-gray-600">
+                  {form.days} يوم × {dailyRateOf(form.employeeId).toFixed(1)} ج.م =
+                </span>
+                <span className="text-lg font-bold text-red-600">{computedAmt.toLocaleString()} ج.م</span>
+              </div>
+            )}
           </div>
+
           <DialogFooter className="gap-2 mt-2">
-            <Button onClick={handleAddSalary} className="bg-blue-600 hover:bg-blue-700 text-white">حفظ</Button>
-            <Button variant="outline" onClick={() => setShowAddSalary(false)}>إلغاء</Button>
+            <Button onClick={handleSave} disabled={saving} className="bg-red-600 hover:bg-red-700 text-white">
+              {saving ? "جاري الحفظ..." : editRow ? "حفظ التعديل" : "إضافة الخصم"}
+            </Button>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
+
 /* ──────────────────────────────────────────
    LEAVES TAB
 ────────────────────────────────────────── */
@@ -489,13 +1004,21 @@ function LeavesTab({ employees }: { employees: EmployeeMini[] }) {
    ADVANCES & ABSENCES TAB
 ────────────────────────────────────────── */
 function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
-  const [advances, setAdvances] = useState<BackendAdvance[]>([]);
-  const [absences, setAbsences] = useState<BackendAbsence[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [advances, setAdvances]   = useState<BackendAdvance[]>([]);
+  const [absences, setAbsences]   = useState<BackendAbsence[]>([]);
+  const [loading, setLoading]     = useState(true);
+
+  // Add state
   const [showAddAdv, setShowAddAdv] = useState(false);
   const [showAddAbs, setShowAddAbs] = useState(false);
   const [advForm, setAdvForm] = useState({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
   const [absForm, setAbsForm] = useState({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
+
+  // Edit state
+  const [editAdv, setEditAdv] = useState<BackendAdvance | null>(null);
+  const [editAdvForm, setEditAdvForm] = useState({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
+  const [editAbs, setEditAbs] = useState<BackendAbsence | null>(null);
+  const [editAbsForm, setEditAbsForm] = useState({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -510,15 +1033,11 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── Add handlers ──
   const handleAddAdv = async () => {
     if (!advForm.employeeId || !advForm.amount) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
     try {
-      await addAdvance({
-        employeeId: advForm.employeeId,
-        amount: Number(advForm.amount),
-        installmentsCount: Number(advForm.deductMonths) || 1,
-        reason: advForm.reason || undefined,
-      });
+      await addAdvance({ employeeId: advForm.employeeId, amount: Number(advForm.amount), installmentsCount: Number(advForm.deductMonths) || 1, reason: advForm.reason || undefined });
       toast.success("تم تسجيل السلفة");
       setShowAddAdv(false);
       setAdvForm({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
@@ -529,18 +1048,72 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
   const handleAddAbs = async () => {
     if (!absForm.employeeId || !absForm.date) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
     try {
-      await addAbsence({
-        employeeId: absForm.employeeId,
-        absenceDate: absForm.date,
-        absenceType: absForm.type,
-        deductionAmount: Number(absForm.deduction) || 0,
-        notes: absForm.reason || undefined,
-      });
+      await addAbsence({ employeeId: absForm.employeeId, absenceDate: absForm.date, absenceType: absForm.type, deductionAmount: Number(absForm.deduction) || 0, notes: absForm.reason || undefined });
       toast.success("تم تسجيل الغياب/التأخير");
       setShowAddAbs(false);
       setAbsForm({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
       await load();
     } catch (err) { toast.error(err instanceof Error ? err.message : "فشل تسجيل الغياب"); }
+  };
+
+  // ── Edit openers ──
+  const openEditAdv = (adv: BackendAdvance) => {
+    setEditAdv(adv);
+    setEditAdvForm({
+      employeeId: adv.employeeId,
+      amount: String(adv.amount),
+      reason: adv.reason ?? "",
+      deductMonths: String(adv.installmentsCount ?? 1),
+    });
+  };
+
+  const openEditAbs = (abs: BackendAbsence) => {
+    setEditAbs(abs);
+    setEditAbsForm({
+      employeeId: abs.employeeId,
+      date: abs.absenceDate ? abs.absenceDate.split("T")[0] : "",
+      type: abs.absenceType ?? "غياب",
+      reason: abs.notes ?? "",
+      deduction: String(abs.deductionAmount ?? ""),
+    });
+  };
+
+  // ── Edit handlers ──
+  const handleEditAdv = async () => {
+    if (!editAdv) return;
+    if (!editAdvForm.amount) { toast.error("يرجى إدخال المبلغ"); return; }
+    try {
+      await editAdvance({
+        id: editAdv.id,
+        employeeId: editAdvForm.employeeId,
+        amount: Number(editAdvForm.amount),
+        installmentsCount: Number(editAdvForm.deductMonths) || 1,
+        reason: editAdvForm.reason || undefined,
+        isActive: true,
+      });
+      toast.success("تم تعديل السلفة");
+      setEditAdv(null);
+      await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل تعديل السلفة"); }
+  };
+
+  const handleEditAbs = async () => {
+    if (!editAbs) return;
+    if (!editAbsForm.date) { toast.error("يرجى إدخال التاريخ"); return; }
+    try {
+      await editAbsence({
+        id: editAbs.id,
+        employeeId: editAbsForm.employeeId,
+        absenceDate: editAbsForm.date,
+        absenceType: editAbsForm.type,
+        deductionAmount: Number(editAbsForm.deduction) || 0,
+        notes: editAbsForm.reason || undefined,
+        isActive: true,
+      });
+      toast.success("تم تعديل سجل الغياب");
+      setEditAbs(null);
+      await load();
+    } catch (err) { toast.error(err instanceof Error ? err.message : "فشل تعديل الغياب"); }
   };
 
   const advStatusStyle = (s?: string | null) =>
@@ -550,6 +1123,8 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
 
   return (
     <div className="space-y-6">
+
+      {/* ── السلف ── */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-gray-700 text-sm">السلف</h3>
@@ -562,16 +1137,16 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
-                  {["الموظف", "المبلغ", "التاريخ", "السبب", "الاستقطاع الشهري", "المتبقي", "الحالة"].map(h => (
+                  {["الموظف", "المبلغ", "التاريخ", "السبب", "الاستقطاع الشهري", "المتبقي", "الحالة", "إجراء"].map(h => (
                     <th key={h} className="text-right px-4 py-3 text-xs font-medium text-gray-500">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={7} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
+                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
                 ) : advances.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-8 text-gray-400">لا توجد سلف مسجلة</td></tr>
+                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">لا توجد سلف مسجلة</td></tr>
                 ) : advances.map((adv, idx) => (
                   <tr key={adv.id} className={cn("border-b hover:bg-gray-50/50", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
                     <td className="px-4 py-3.5 font-medium text-gray-800">{adv.employeeName ?? "—"}</td>
@@ -587,6 +1162,15 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
                     <td className="px-4 py-3.5">
                       <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", advStatusStyle(adv.status))}>{adv.status ?? "—"}</span>
                     </td>
+                    <td className="px-4 py-3.5">
+                      <button
+                        onClick={() => openEditAdv(adv)}
+                        className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <Edit className="w-5 h-5" />
+                        <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -595,6 +1179,7 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
         </Card>
       </div>
 
+      {/* ── الغياب والتأخير ── */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-gray-700 text-sm">الغياب والتأخير</h3>
@@ -607,16 +1192,16 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
-                  {["الموظف", "التاريخ", "النوع", "الاستقطاع", "ملاحظات"].map(h => (
+                  {["الموظف", "التاريخ", "النوع", "الاستقطاع", "ملاحظات", "إجراء"].map(h => (
                     <th key={h} className="text-right px-4 py-3 text-xs font-medium text-gray-500">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={5} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
+                  <tr><td colSpan={6} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
                 ) : absences.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-8 text-gray-400">لا توجد سجلات غياب</td></tr>
+                  <tr><td colSpan={6} className="text-center py-8 text-gray-400">لا توجد سجلات غياب</td></tr>
                 ) : absences.map((abs, idx) => (
                   <tr key={abs.id} className={cn("border-b hover:bg-gray-50/50", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
                     <td className="px-4 py-3.5 font-medium text-gray-800">{abs.employeeName ?? "—"}</td>
@@ -628,6 +1213,15 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
                     </td>
                     <td className="px-4 py-3.5 text-red-600 font-medium">{(abs.deductionAmount ?? 0) > 0 ? `-${(abs.deductionAmount ?? 0).toLocaleString()} ج.م` : "—"}</td>
                     <td className="px-4 py-3.5 text-gray-500 text-xs">{abs.notes || "—"}</td>
+                    <td className="px-4 py-3.5">
+                      <button
+                        onClick={() => openEditAbs(abs)}
+                        className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <Edit className="w-5 h-5" />
+                        <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -636,6 +1230,7 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
         </Card>
       </div>
 
+      {/* ── Add Advance Dialog ── */}
       <Dialog open={showAddAdv} onOpenChange={setShowAddAdv}>
         <DialogContent dir="rtl" className="max-w-md bg-white">
           <DialogHeader><DialogTitle>إضافة سلفة جديدة</DialogTitle></DialogHeader>
@@ -667,6 +1262,39 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
         </DialogContent>
       </Dialog>
 
+      {/* ── Edit Advance Dialog ── */}
+      <Dialog open={!!editAdv} onOpenChange={() => setEditAdv(null)}>
+        <DialogContent dir="rtl" className="max-w-md bg-white">
+          <DialogHeader><DialogTitle>تعديل السلفة</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="col-span-2 space-y-1.5">
+              <Label>الموظف</Label>
+              <Select value={editAdvForm.employeeId} onValueChange={v => setEditAdvForm({ ...editAdvForm, employeeId: v })}>
+                <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="اختر موظفاً" /></SelectTrigger>
+                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>المبلغ (ج.م) <span className="text-red-500">*</span></Label>
+              <Input type="number" dir="rtl" value={editAdvForm.amount} onChange={e => setEditAdvForm({ ...editAdvForm, amount: e.target.value })} placeholder="0" className="border-gray-200" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>عدد أشهر الاستقطاع</Label>
+              <Input type="number" dir="rtl" value={editAdvForm.deductMonths} onChange={e => setEditAdvForm({ ...editAdvForm, deductMonths: e.target.value })} min="1" className="border-gray-200" />
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label>السبب</Label>
+              <Input dir="rtl" value={editAdvForm.reason} onChange={e => setEditAdvForm({ ...editAdvForm, reason: e.target.value })} className="border-gray-200" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 mt-2">
+            <Button onClick={handleEditAdv} className="bg-blue-600 hover:bg-blue-700 text-white">حفظ التعديلات</Button>
+            <Button variant="outline" onClick={() => setEditAdv(null)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Absence Dialog ── */}
       <Dialog open={showAddAbs} onOpenChange={setShowAddAbs}>
         <DialogContent dir="rtl" className="max-w-md bg-white">
           <DialogHeader><DialogTitle>تسجيل غياب / تأخير</DialogTitle></DialogHeader>
@@ -707,6 +1335,49 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Edit Absence Dialog ── */}
+      <Dialog open={!!editAbs} onOpenChange={() => setEditAbs(null)}>
+        <DialogContent dir="rtl" className="max-w-md bg-white">
+          <DialogHeader><DialogTitle>تعديل سجل الغياب</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="space-y-1.5">
+              <Label>الموظف</Label>
+              <Select value={editAbsForm.employeeId} onValueChange={v => setEditAbsForm({ ...editAbsForm, employeeId: v })}>
+                <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="اختر موظفاً" /></SelectTrigger>
+                <SelectContent dir="rtl">{employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>التاريخ <span className="text-red-500">*</span></Label>
+              <Input type="date" value={editAbsForm.date} onChange={e => setEditAbsForm({ ...editAbsForm, date: e.target.value })} className="border-gray-200" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>النوع</Label>
+              <Select value={editAbsForm.type} onValueChange={v => setEditAbsForm({ ...editAbsForm, type: v })}>
+                <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue /></SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="غياب">غياب</SelectItem>
+                  <SelectItem value="تأخير">تأخير</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>الاستقطاع (ج.م)</Label>
+              <Input type="number" dir="rtl" value={editAbsForm.deduction} onChange={e => setEditAbsForm({ ...editAbsForm, deduction: e.target.value })} placeholder="0" className="border-gray-200" />
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Input dir="rtl" value={editAbsForm.reason} onChange={e => setEditAbsForm({ ...editAbsForm, reason: e.target.value })} className="border-gray-200" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 mt-2">
+            <Button onClick={handleEditAbs} className="bg-orange-500 hover:bg-orange-600 text-white">حفظ التعديلات</Button>
+            <Button variant="outline" onClick={() => setEditAbs(null)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
@@ -752,7 +1423,7 @@ export function Employees() {
   const [selected, setSelected] = useState<EmployeeRow | null>(null);
   const [viewTarget, setViewTarget] = useState<EmployeeRow | null>(null);
   const [editTarget, setEditTarget] = useState<EmployeeRow | null>(null);
-  const [editForm, setEditForm] = useState({ fullName: "", arName: "", nationalId: "", jobTitleId: "", phone: "", email: "", salary: "" });
+  const [editForm, setEditForm] = useState({ fullName: "", arName: "", nationalId: "", jobTitleId: "", phone: "", email: "", salary: "", status: "active" });
   const [search, setSearch] = useState("");
 
   const emptyAddForm = {
@@ -876,6 +1547,7 @@ export function Employees() {
       phone: emp.phone,
       email: emp.email,
       salary: String(emp.salary),
+      status: emp.status,
     });
     setShowEdit(true);
   };
@@ -904,7 +1576,7 @@ export function Employees() {
         hireDate: r.hireDate ?? null,
         terminationDate: r.terminationDate ?? null,
         baseSalary: editForm.salary ? Number(editForm.salary) : null,
-        employmentStatus: r.employmentStatus,
+        employmentStatus: editForm.status === "active" ? "Active" : "Inactive",
         bankAccountNumber: r.bankAccountNumber ?? null,
         notes: r.notes ?? null,
         userId: r.userId ?? null,
@@ -968,6 +1640,7 @@ export function Employees() {
         <TabsList className="bg-gray-100 mb-4">
           <TabsTrigger value="employees">الموظفون</TabsTrigger>
           <TabsTrigger value="salaries">المرتبات</TabsTrigger>
+          <TabsTrigger value="deductions">الخصومات</TabsTrigger>
           <TabsTrigger value="leaves">الإجازات</TabsTrigger>
           <TabsTrigger value="advances">السلف والغياب</TabsTrigger>
         </TabsList>
@@ -1064,10 +1737,19 @@ export function Employees() {
                           </span>
                         </td>
                         <td className="px-4 py-3.5">
-                          <div className="flex gap-1">
-                            <button className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" onClick={() => { setViewTarget(emp); setShowView(true); }}><Eye className="w-3.5 h-3.5" /></button>
-                            <button className="p-1.5 text-gray-600 hover:bg-gray-100 rounded transition-colors" onClick={() => openEdit(emp)}><Edit className="w-3.5 h-3.5" /></button>
-                            <button className="p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors" onClick={() => { setSelected(emp); setShowPerms(true); }}><Shield className="w-3.5 h-3.5" /></button>
+                          <div className="flex items-center gap-2">
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" onClick={() => { setViewTarget(emp); setShowView(true); }}>
+                              <Eye className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">بيانات الموظف</span>
+                            </button>
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" onClick={() => openEdit(emp)}>
+                              <Edit className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
+                            </button>
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" onClick={() => { setSelected(emp); setShowPerms(true); }}>
+                              <Shield className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">الصلاحيات</span>
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1084,9 +1766,10 @@ export function Employees() {
           )}
         </TabsContent>
 
-        <TabsContent value="salaries"><SalariesTab employees={employees.map(e => ({ id: e.id, name: e.name }))} /></TabsContent>
-        <TabsContent value="leaves"><LeavesTab employees={employees.map(e => ({ id: e.id, name: e.name }))} /></TabsContent>
-        <TabsContent value="advances"><AdvancesTab employees={employees.map(e => ({ id: e.id, name: e.name }))} /></TabsContent>
+        <TabsContent value="salaries"><SalariesTab employees={employees.map(e => ({ id: e.id, name: e.name, salary: e.salary, status: e.status }))} /></TabsContent>
+        <TabsContent value="deductions"><DeductionsTab employees={employees.map(e => ({ id: e.id, name: e.name, salary: e.salary, status: e.status }))} /></TabsContent>
+        <TabsContent value="leaves"><LeavesTab employees={employees.map(e => ({ id: e.id, name: e.name, salary: e.salary, status: e.status }))} /></TabsContent>
+        <TabsContent value="advances"><AdvancesTab employees={employees.map(e => ({ id: e.id, name: e.name, salary: e.salary, status: e.status }))} /></TabsContent>
       </Tabs>
 
       {/* View Employee Dialog */}
@@ -1467,6 +2150,16 @@ export function Employees() {
             <div className="space-y-1.5">
               <Label>الراتب (ج.م)</Label>
               <Input dir="rtl" type="number" placeholder="0" className="border border-[#d1d5dc] bg-[#f9fafb]" value={editForm.salary} onChange={e => setEditForm({ ...editForm, salary: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>حالة الموظف</Label>
+              <Select value={editForm.status} onValueChange={v => setEditForm({ ...editForm, status: v })}>
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue /></SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="active"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" />نشط</span></SelectItem>
+                  <SelectItem value="inactive"><span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-400 inline-block" />غير نشط</span></SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">

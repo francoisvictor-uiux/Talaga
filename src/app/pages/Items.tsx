@@ -675,21 +675,25 @@ export function Items() {
                                 </span>
                               </td>
                               <td className="px-4 py-3">
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-2">
                                   <button
-                                    className="p-1.5 text-violet-600 hover:bg-violet-50 rounded-md transition-colors"
+                                    className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
                                     onClick={() => openBrands(it)}
-                                    title="ماركات الصنف"
                                   >
-                                    <Tag className="w-3.5 h-3.5" />
+                                    <Tag className="w-5 h-5" />
+                                    <span className="text-[10px] font-medium whitespace-nowrap">ماركات</span>
                                   </button>
                                   <button
-                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                                    className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                     onClick={() => openEditItem(it)}
                                   >
-                                    <Edit className="w-3.5 h-3.5" />
+                                    <Edit className="w-5 h-5" />
+                                    <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
                                   </button>
-                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(it.name, () => { void handleDeleteItem(it); })}><Trash2 className="w-3.5 h-3.5" /></button>
+                                  <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" onClick={() => confirmDelete(it.name, () => { void handleDeleteItem(it); })}>
+                                    <Trash2 className="w-5 h-5" />
+                                    <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
+                                  </button>
                                 </div>
                               </td>
                             </motion.tr>
@@ -811,14 +815,18 @@ export function Items() {
                                 <span className="text-gray-400 text-xs mr-1">سم</span>
                               </td>
                               <td className="px-4 py-3">
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-2">
                                   <button
-                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                                    className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                     onClick={() => openEditPkg(pkg)}
                                   >
-                                    <Edit className="w-3.5 h-3.5" />
+                                    <Edit className="w-5 h-5" />
+                                    <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
                                   </button>
-                                  <button className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors" onClick={() => confirmDelete(pkg.type, () => { void handleDeletePkg(pkg); })}><Trash2 className="w-3.5 h-3.5" /></button>
+                                  <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" onClick={() => confirmDelete(pkg.type, () => { void handleDeletePkg(pkg); })}>
+                                    <Trash2 className="w-5 h-5" />
+                                    <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -1135,18 +1143,20 @@ export function Items() {
                         </td>
                         <td className="px-4 py-2.5 text-gray-500 text-xs">{brand.notes || "—"}</td>
                         <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-2">
                             <button
-                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                               onClick={() => openEditBrand(brand)}
                             >
-                              <Edit className="w-3.5 h-3.5" />
+                              <Edit className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
                             </button>
                             <button
-                              className="p-1.5 text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                               onClick={() => confirmDelete(brand.name, () => { void handleDeleteBrand(brand); })}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
                             </button>
                           </div>
                         </td>

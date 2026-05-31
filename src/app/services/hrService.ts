@@ -20,10 +20,12 @@ export type BackendSalary = {
   month: number;
   baseSalary: number;
   bonuses?: number | null;
-  deductions?: number | null;
-  advancesDeducted?: number | null;
-  absenceDeductions?: number | null;
-  netSalary: number;
+  deductions?: number | null;              // استقطاعات: insurance / tax
+  advancesDeducted?: number | null;        // خصم سلف (auto-computed)
+  absenceDeductions?: number | null;       // خصم غياب (auto-computed)
+  employeeDeductionsTotal?: number | null; // مجموع الخصومات التأديبية
+  netSalary: number;                       // BaseSalary + Bonuses - Deductions - AdvancesDeducted - AbsenceDeductions
+  actualNetSalary?: number | null;         // netSalary - employeeDeductionsTotal
   paidDate?: string | null;
   status: string;
   notes?: string | null;
@@ -55,6 +57,22 @@ export async function addSalary(payload: AddSalaryPayload): Promise<BackendSalar
 
 export async function markSalaryPaid(id: string): Promise<void> {
   await apiFetch<ServiceResult<boolean>>("/HR/MarkSalaryPaid", { method: "POST", headers: { "X-Id": id } });
+}
+
+export type EditSalaryPayload = {
+  id: string;
+  employeeId: string;
+  year: number;
+  month: number;
+  baseSalary: number;
+  bonuses?: number;
+  deductions?: number;   // استقطاعات: insurance / tax (EmployeeSalaries.Deductions column)
+  notes?: string;
+  isActive?: boolean;
+};
+
+export async function editSalary(payload: EditSalaryPayload): Promise<BackendSalary> {
+  return unwrap(await apiFetch<ServiceResult<BackendSalary>>("/HR/EditSalary", { method: "PUT", body: payload }), "فشل تعديل المرتب");
 }
 
 export async function addSalaryBonus(id: string, amount: number): Promise<void> {
@@ -129,6 +147,19 @@ export async function addAdvance(payload: AddAdvancePayload): Promise<BackendAdv
   return unwrap(await apiFetch<ServiceResult<BackendAdvance>>("/HR/AddAdvance", { method: "POST", body: payload }), "فشل إضافة السلفة");
 }
 
+export type EditAdvancePayload = {
+  id: string;
+  employeeId: string;
+  amount: number;
+  installmentsCount?: number;
+  reason?: string;
+  isActive?: boolean;
+};
+
+export async function editAdvance(payload: EditAdvancePayload): Promise<BackendAdvance> {
+  return unwrap(await apiFetch<ServiceResult<BackendAdvance>>("/HR/EditAdvance", { method: "PUT", body: payload }), "فشل تعديل السلفة");
+}
+
 // ===== Absences =====
 export type BackendAbsence = {
   id: string;
@@ -158,4 +189,69 @@ export async function getAbsences(employeeId?: string): Promise<BackendAbsence[]
 
 export async function addAbsence(payload: AddAbsencePayload): Promise<BackendAbsence> {
   return unwrap(await apiFetch<ServiceResult<BackendAbsence>>("/HR/AddAbsence", { method: "POST", body: payload }), "فشل إضافة سجل الغياب");
+}
+
+export type EditAbsencePayload = {
+  id: string;
+  employeeId: string;
+  absenceDate: string;
+  absenceType: string;
+  isExcused?: boolean;
+  deductionAmount?: number;
+  notes?: string;
+  isActive?: boolean;
+};
+
+export async function editAbsence(payload: EditAbsencePayload): Promise<BackendAbsence> {
+  return unwrap(await apiFetch<ServiceResult<BackendAbsence>>("/HR/EditAbsence", { method: "PUT", body: payload }), "فشل تعديل سجل الغياب");
+}
+
+// ===== Employee Deductions (خصومات) =====
+export type BackendDeduction = {
+  id: string;
+  employeeId: string;
+  employeeName?: string | null;
+  year: number;
+  month: number;
+  days?: number | null;
+  amount: number;
+  deductionType: string;
+  reason?: string | null;
+  creationDate: string;
+};
+
+export type AddDeductionPayload = {
+  employeeId: string;
+  year: number;
+  month: number;
+  days?: number;
+  amount: number;
+  deductionType: string;
+  reason?: string;
+};
+
+export type EditDeductionPayload = AddDeductionPayload & {
+  id: string;
+  isActive?: boolean;
+};
+
+export async function getDeductions(year?: number, month?: number, employeeId?: string): Promise<BackendDeduction[]> {
+  const p = new URLSearchParams();
+  if (year)       p.set("year",       String(year));
+  if (month)      p.set("month",      String(month));
+  if (employeeId) p.set("employeeId", employeeId);
+  const qs = p.toString() ? `?${p.toString()}` : "";
+  return unwrap(await apiFetch<ServiceResult<BackendDeduction[]>>(`/HR/GetDeductions${qs}`), "فشل تحميل الخصومات");
+}
+
+export async function addDeduction(payload: AddDeductionPayload): Promise<BackendDeduction> {
+  return unwrap(await apiFetch<ServiceResult<BackendDeduction>>("/HR/AddDeduction", { method: "POST", body: payload }), "فشل إضافة الخصم");
+}
+
+export async function editDeduction(payload: EditDeductionPayload): Promise<BackendDeduction> {
+  return unwrap(await apiFetch<ServiceResult<BackendDeduction>>("/HR/EditDeduction", { method: "PUT", body: payload }), "فشل تعديل الخصم");
+}
+
+export async function deleteDeduction(id: string): Promise<void> {
+  await apiFetch<ServiceResult<boolean>>("/HR/DeleteDeduction", { method: "DELETE", headers: { "X-Id": id } });
 }
