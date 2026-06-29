@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState } from "react";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { motion } from "motion/react";
 import { ClipboardList, Filter, AlertTriangle, CheckCircle, TrendingUp, Search, X } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
@@ -20,9 +21,9 @@ export function Inventory() {
   const [warehouses, setWarehouses] = useState<BackendWarehouse[]>([]);
   const [items, setItems] = useState<BackendItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [warehouseFilter, setWarehouseFilter] = useState("all");
-  const [itemFilter, setItemFilter] = useState("all");
+  const [search, setSearch, resetSearch] = useSessionFilter("stock_search", "");
+  const [warehouseFilter, setWarehouseFilter, resetWarehouse] = useSessionFilter("stock_warehouse", "all");
+  const [itemFilter, setItemFilter, resetItem] = useSessionFilter("stock_item", "all");
 
   const loadBalances = async () => {
     setLoading(true);
@@ -49,7 +50,7 @@ export function Inventory() {
     return true;
   });
 
-  const pager = usePagination(filtered, 10);
+  const pager = usePagination(filtered, 50);
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
@@ -107,7 +108,9 @@ export function Inventory() {
                 </SelectContent>
               </Select>
               <Button size="sm" className="bg-blue-600 hover:bg-blue-700 text-white" onClick={loadBalances} disabled={loading}>{loading ? "جاري التحميل..." : "تطبيق"}</Button>
-              <Button size="sm" variant="outline" onClick={() => { setSearch(""); setWarehouseFilter("all"); setItemFilter("all"); }}>إعادة تعيين</Button>
+              {(search || warehouseFilter !== "all" || itemFilter !== "all") && (
+                <Button size="sm" variant="outline" onClick={() => { resetSearch(); resetWarehouse(); resetItem(); pager.reset(); }}>إعادة تعيين</Button>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -5,7 +5,7 @@ import { cn } from "./utils";
 /* ─────────────────────────────────────────────
    usePagination — generic hook for any list
 ───────────────────────────────────────────── */
-export function usePagination<T>(data: T[], defaultPageSize = 10) {
+export function usePagination<T>(data: T[], defaultPageSize = 50) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(defaultPageSize);
 
@@ -124,7 +124,7 @@ export function Pagination({
             onChange={e => onPageSizeChange(Number(e.target.value))}
             className="text-xs border border-gray-200 rounded-md px-2 py-1 bg-white text-gray-600 cursor-pointer hover:border-gray-300 transition-colors"
           >
-            {[5, 10, 25, 50].map(s => (
+            {[10, 25, 50, 100].map(s => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>

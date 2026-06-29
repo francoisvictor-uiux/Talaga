@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { useSessionFilter } from '../hooks/useSessionFilter'
 import { toast } from 'sonner'
 import {
   Search, Plus, X, Download, Landmark, Wallet2,
@@ -23,7 +24,7 @@ const fmtDate  = (d: string) =>
 const genId = (p = 'id') => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 const todayStr = () => new Date().toISOString().split('T')[0]
 
-const PAGE_SIZE = 10
+const PAGE_SIZE = 50
 
 function usePagination<T>(items: T[], pageSize = PAGE_SIZE) {
   const [page, setPage] = useState(1)
@@ -429,9 +430,9 @@ const TYPE_FILTER_LABELS: Record<string, string> = { all: 'الكل', deposit: '
 export default function CashierPage() {
   const [accs, setAccs]   = useLocalStorage<TreasuryAccount[]>('vetafarm_treasury_accounts', initAccounts)
   const [txs,  setTxs]    = useLocalStorage<TreasuryTransaction[]>('vetafarm_treasury_txs', initTransactions)
-  const [search, setSearch] = useState('')
-  const [filterType, setFilterType] = useState<TxType | 'all'>('all')
-  const [filterAcc,  setFilterAcc]  = useState<string>('all')
+  const [search, setSearch, resetSearch] = useSessionFilter('cash_search', '')
+  const [filterType, setFilterType, resetFilterType] = useSessionFilter<TxType | 'all'>('cash_type', 'all')
+  const [filterAcc,  setFilterAcc,  resetFilterAcc]  = useSessionFilter('cash_acc', 'all')
   const [selectedAccId, setSelectedAccId] = useState<string | null>(null)
 
   const [showDeposit,  setShowDeposit]  = useState(false)
@@ -596,6 +597,12 @@ export default function CashierPage() {
                 </button>
               ))}
             </div>
+            {(search || filterType !== 'all' || filterAcc !== 'all') && (
+              <button onClick={() => { resetSearch(); resetFilterType(); resetFilterAcc(); setPage(1); }}
+                className="h-9 px-3 rounded-lg border border-neutral-200 bg-neutral-50 font-cairo text-[12px] text-neutral-500 hover:text-neutral-700 hover:border-neutral-300 transition-colors whitespace-nowrap">
+                إعادة تعيين
+              </button>
+            )}
           </div>
 
           <div className="overflow-x-auto">

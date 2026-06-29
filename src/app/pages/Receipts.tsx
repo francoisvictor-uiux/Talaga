@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { motion } from "motion/react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Card, CardContent } from "../components/ui/card";
@@ -23,7 +24,7 @@ const blankReceipt = () => ({ customerId: "", partyName: "", amount: "", payment
 export function Receipts() {
   const [vouchers, setVouchers] = useState<BackendVoucher[]>([]);
   const [customers, setCustomers] = useState<BackendCustomer[]>([]);
-  const [historySearch, setHistorySearch] = useState("");
+  const [historySearch, setHistorySearch, resetHistorySearch] = useSessionFilter("rec_search", "");
   const [receiptForm, setReceiptForm] = useState(blankReceipt());
   const [expenseForm, setExpenseForm] = useState({ description: "", amount: "", cashAccount: "main", voucherDate: new Date().toISOString().split("T")[0], notes: "" });
   const [saving, setSaving] = useState(false);
@@ -38,7 +39,7 @@ export function Receipts() {
   const filtered = vouchers.filter(v =>
     !historySearch || v.voucherNo.includes(historySearch) || v.partyName.includes(historySearch) || v.voucherType.includes(historySearch)
   );
-  const pager = usePagination(filtered, 10);
+  const pager = usePagination(filtered, 50);
 
   const handleSaveReceipt = async () => {
     if (!receiptForm.customerId && !receiptForm.partyName) { toast.error("يرجى اختيار العميل"); return; }

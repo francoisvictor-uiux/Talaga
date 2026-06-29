@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { motion } from "motion/react";
 import { Shield, Search } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
@@ -41,10 +42,10 @@ const formatDateTime = (iso: string) => {
 
 export function AuditLog() {
   const [rawLogs, setRawLogs] = useState<BackendAuditLog[]>([]);
-  const [search, setSearch] = useState("");
-  const [moduleFilter, setModuleFilter] = useState("الكل");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [search, setSearch, resetSearch] = useSessionFilter("audit_search", "");
+  const [moduleFilter, setModuleFilter, resetModule] = useSessionFilter("audit_module", "الكل");
+  const [fromDate, setFromDate, resetFrom] = useSessionFilter("audit_from", "");
+  const [toDate, setToDate, resetTo] = useSessionFilter("audit_to", "");
   const [selected, setSelected] = useState<BackendAuditLog | null>(null);
 
   useEffect(() => {
@@ -77,7 +78,7 @@ export function AuditLog() {
     });
   }, [rawLogs, search, moduleFilter, fromDate, toDate]);
 
-  const pager = usePagination(filtered, 10);
+  const pager = usePagination(filtered, 50);
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
@@ -116,6 +117,9 @@ export function AuditLog() {
               <span className="text-gray-400 text-xs">إلى</span>
               <Input type="date" className="w-36" value={toDate} onChange={e => setToDate(e.target.value)} />
             </div>
+            {(search || moduleFilter !== "الكل" || fromDate || toDate) && (
+              <Button size="sm" variant="outline" onClick={() => { resetSearch(); resetModule(); resetFrom(); resetTo(); pager.reset(); }}>إعادة تعيين</Button>
+            )}
             <div className="text-xs text-gray-500 mr-auto">{filtered.length} سجل</div>
           </CardContent>
         </Card>

@@ -35,12 +35,16 @@ export type BackendItem = {
   storageType: string;
   baseUnit?: string | null;
   unitWeightKg?: number | null;
+  airingDays?: number | null;
   shelfLifeDays?: number | null;
   alertDaysBeforeExpiry?: number | null;
+  expiryDays?: number | null;
   temperatureMin?: number | null;
   temperatureMax?: number | null;
   barcode?: string | null;
   imageUrl?: string | null;
+  defaultNaulage?: number | null;
+  defaultNaulageUnit?: string | null;
   isActive: boolean;
   creationDate: string;
 };
@@ -57,6 +61,10 @@ export type AddItemPayload = {
   temperatureMin?: number;
   temperatureMax?: number;
   imageUrl?: string;
+  airingDays?: number;
+  expiryDays?: number;
+  defaultNaulage?: number;
+  defaultNaulageUnit?: string;
 };
 
 export type EditItemPayload = AddItemPayload & {
@@ -137,6 +145,52 @@ export async function editPackage(payload: EditPackagePayload): Promise<BackendP
 
 export async function deletePackage(id: string): Promise<void> {
   await apiFetch<ServiceResult<boolean>>("/Items/DeactivatePackage", { method: "DELETE", headers: { "X-Id": id } });
+}
+
+// ===== Price List =====
+export type BackendPriceList = {
+  id: string;
+  itemId: string;
+  listName: string;
+  price: number;
+  unit: string;
+  notes?: string | null;
+  isActive: boolean;
+  creationDate: string;
+};
+
+export type AddPriceListPayload = {
+  itemId: string;
+  listName: string;
+  price: number;
+  unit: string;
+  notes?: string;
+};
+
+export type EditPriceListPayload = AddPriceListPayload & { id: string; isActive: boolean };
+
+export async function getPriceListsByItem(itemId: string): Promise<BackendPriceList[]> {
+  const res = await apiFetch<ServiceResult<BackendPriceList[]>>(`/Items/GetPriceListsByItem?itemId=${itemId}`);
+  if (!res.isSuccess) throw new Error(res.errorMessages?.[0] ?? "فشل تحميل قائمة الأسعار");
+  return res.data ?? [];
+}
+
+export async function addPriceList(payload: AddPriceListPayload): Promise<BackendPriceList> {
+  return unwrap(
+    await apiFetch<ServiceResult<BackendPriceList>>("/Items/AddPriceList", { method: "POST", body: payload }),
+    "فشل إضافة السعر",
+  );
+}
+
+export async function editPriceList(payload: EditPriceListPayload): Promise<BackendPriceList> {
+  return unwrap(
+    await apiFetch<ServiceResult<BackendPriceList>>("/Items/EditPriceList", { method: "PUT", body: payload }),
+    "فشل تحديث السعر",
+  );
+}
+
+export async function deletePriceList(id: string): Promise<void> {
+  await apiFetch<ServiceResult<boolean>>("/Items/DeactivatePriceList", { method: "DELETE", headers: { "X-Id": id } });
 }
 
 // ===== Category =====

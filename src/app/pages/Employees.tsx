@@ -1,10 +1,12 @@
 ﻿import { useCallback, useEffect, useState } from "react";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { motion } from "motion/react";
 import {
   Plus, Eye, EyeOff, Edit, Shield, List, LayoutGrid, Search, X, Trash2,
   Phone, Mail, DollarSign, CheckCircle2, XCircle, Clock,
-  AlertCircle, Banknote, Calendar, TrendingUp, Users, CreditCard
+  AlertCircle, Banknote, Calendar, TrendingUp, Users, CreditCard, ChevronDown, Info,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -67,6 +69,7 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
   });
   const [rows, setRows]             = useState<BackendSalary[]>([]);
   const [deductions, setDeductions] = useState<BackendDeduction[]>([]);
+  const [allAdvances, setAllAdvances] = useState<BackendAdvance[]>([]);
   const [loading, setLoading]       = useState(true);
   const [generating, setGenerating] = useState(false);
   const [selectedIds, setSelectedIds]     = useState<string[]>([]);
@@ -95,7 +98,9 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setRows(await getSalaries(year, month));
+      const [salRows, advList] = await Promise.all([getSalaries(year, month), getAdvances()]);
+      setRows(salRows);
+      setAllAdvances(advList.filter(a => a.status !== "مسدد"));
       void loadDeductions();
     } catch (err) { toast.error(err instanceof Error ? err.message : "فشل تحميل المرتبات"); }
     finally { setLoading(false); }
@@ -342,8 +347,62 @@ function SalariesTab({ employees }: { employees: EmployeeMini[] }) {
                     <td className="px-4 py-3.5 text-blue-600 text-xs">{dailyRate(rec).toFixed(1)} ج.م</td>
                     <td className="px-4 py-3.5 text-yellow-600">{(rec.bonuses ?? 0) > 0 ? `+${(rec.bonuses ?? 0).toLocaleString()}` : "—"}</td>
                     <td className="px-4 py-3.5 text-gray-500">{(rec.deductions ?? 0) > 0 ? `-${(rec.deductions ?? 0).toLocaleString()} ج.م` : "—"}</td>
-                    <td className="px-4 py-3.5 text-orange-600 text-xs font-medium">
-                      {(rec.advancesDeducted ?? 0) > 0 ? `-${(rec.advancesDeducted ?? 0).toLocaleString()} ج.م` : "—"}
+                    <td className="px-4 py-3.5">
+                      {(() => {
+                        const empAdvances = allAdvances.filter(a => a.employeeId === rec.employeeId);
+                        const thisMonthAdvances = empAdvances.filter(a =>
+                          (a.salaryMonth === month && a.salaryYear === year) ||
+                          (!a.salaryMonth && !a.salaryYear)
+                        );
+                        const deducted = rec.advancesDeducted ?? 0;
+                        if (deducted === 0 && empAdvances.length === 0) return <span className="text-gray-300 text-xs">—</span>;
+                        return (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button className="flex items-center gap-1 text-orange-600 font-semibold text-xs hover:text-orange-700 transition-colors">
+                                -{deducted.toLocaleString()} ج.م
+                                {empAdvances.length > 0 && (
+                                  <span className="bg-orange-100 text-orange-700 rounded-full w-4 h-4 flex items-center justify-center text-[10px]">
+                                    {empAdvances.length}
+                                  </span>
+                                )}
+                                <ChevronDown className="w-3 h-3 opacity-50" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent dir="rtl" className="w-72 p-3 space-y-2" align="start">
+                              <p className="text-xs font-semibold text-gray-700 border-b pb-2">
+                                سلف {rec.employeeName} — {year}/{String(month).padStart(2,"0")}
+                              </p>
+                              {empAdvances.length === 0 ? (
+                                <p className="text-xs text-gray-400">لا توجد سلف نشطة</p>
+                              ) : empAdvances.map(a => {
+                                const isThisMonth = (a.salaryMonth === month && a.salaryYear === year) || (!a.salaryMonth && !a.salaryYear);
+                                return (
+                                  <div key={a.id} className={cn("rounded-lg p-2 text-xs space-y-0.5 border", isThisMonth ? "bg-orange-50 border-orange-200" : "bg-gray-50 border-gray-100")}>
+                                    <div className="flex justify-between">
+                                      <span className="text-gray-500">{a.reason || "سلفة"}</span>
+                                      <span className="font-bold text-red-600">{a.amount.toLocaleString()} ج.م</span>
+                                    </div>
+                                    <div className="flex justify-between text-gray-400">
+                                      <span>استقطاع شهري: <span className="text-orange-600 font-medium">{a.monthlyDeduction.toLocaleString()} ج.م</span></span>
+                                      <span>متبقي: <span className="text-orange-700">{(a.remainingAmount ?? 0).toLocaleString()} ج.م</span></span>
+                                    </div>
+                                    {a.salaryMonth && a.salaryYear && (
+                                      <p className={cn("text-[10px] font-medium", isThisMonth ? "text-orange-500" : "text-gray-400")}>
+                                        {isThisMonth ? "✓ مخصصة لهذا الشهر" : `مخصصة لـ ${a.salaryYear}/${String(a.salaryMonth).padStart(2,"0")}`}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              <div className="border-t pt-1.5 flex justify-between text-xs font-semibold">
+                                <span className="text-gray-600">إجمالي الاستقطاع هذا الشهر</span>
+                                <span className="text-orange-700">{deducted.toLocaleString()} ج.م</span>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3.5 text-orange-600 text-xs font-medium">
                       {(rec.absenceDeductions ?? 0) > 0 ? `-${(rec.absenceDeductions ?? 0).toLocaleString()} ج.م` : "—"}
@@ -1011,12 +1070,12 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
   // Add state
   const [showAddAdv, setShowAddAdv] = useState(false);
   const [showAddAbs, setShowAddAbs] = useState(false);
-  const [advForm, setAdvForm] = useState({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
+  const [advForm, setAdvForm] = useState({ employeeId: "", amount: "", reason: "", deductMonths: "1", salaryMonth: "", salaryYear: "" });
   const [absForm, setAbsForm] = useState({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
 
   // Edit state
   const [editAdv, setEditAdv] = useState<BackendAdvance | null>(null);
-  const [editAdvForm, setEditAdvForm] = useState({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
+  const [editAdvForm, setEditAdvForm] = useState({ employeeId: "", amount: "", reason: "", deductMonths: "1", salaryMonth: "", salaryYear: "" });
   const [editAbs, setEditAbs] = useState<BackendAbsence | null>(null);
   const [editAbsForm, setEditAbsForm] = useState({ employeeId: "", date: "", type: "غياب", reason: "", deduction: "" });
 
@@ -1037,10 +1096,17 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
   const handleAddAdv = async () => {
     if (!advForm.employeeId || !advForm.amount) { toast.error("يرجى تعبئة الحقول الإلزامية"); return; }
     try {
-      await addAdvance({ employeeId: advForm.employeeId, amount: Number(advForm.amount), installmentsCount: Number(advForm.deductMonths) || 1, reason: advForm.reason || undefined });
+      await addAdvance({
+        employeeId: advForm.employeeId,
+        amount: Number(advForm.amount),
+        installmentsCount: Number(advForm.deductMonths) || 1,
+        reason: advForm.reason || undefined,
+        salaryMonth: advForm.salaryMonth ? Number(advForm.salaryMonth) : undefined,
+        salaryYear: advForm.salaryYear ? Number(advForm.salaryYear) : undefined,
+      });
       toast.success("تم تسجيل السلفة");
       setShowAddAdv(false);
-      setAdvForm({ employeeId: "", amount: "", reason: "", deductMonths: "1" });
+      setAdvForm({ employeeId: "", amount: "", reason: "", deductMonths: "1", salaryMonth: "", salaryYear: "" });
       await load();
     } catch (err) { toast.error(err instanceof Error ? err.message : "فشل إضافة السلفة"); }
   };
@@ -1064,6 +1130,8 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
       amount: String(adv.amount),
       reason: adv.reason ?? "",
       deductMonths: String(adv.installmentsCount ?? 1),
+      salaryMonth: adv.salaryMonth != null ? String(adv.salaryMonth) : "",
+      salaryYear: adv.salaryYear != null ? String(adv.salaryYear) : "",
     });
   };
 
@@ -1089,6 +1157,8 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
         amount: Number(editAdvForm.amount),
         installmentsCount: Number(editAdvForm.deductMonths) || 1,
         reason: editAdvForm.reason || undefined,
+        salaryMonth: editAdvForm.salaryMonth ? Number(editAdvForm.salaryMonth) : undefined,
+        salaryYear: editAdvForm.salaryYear ? Number(editAdvForm.salaryYear) : undefined,
         isActive: true,
       });
       toast.success("تم تعديل السلفة");
@@ -1137,16 +1207,16 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b">
-                  {["الموظف", "المبلغ", "التاريخ", "السبب", "الاستقطاع الشهري", "المتبقي", "الحالة", "إجراء"].map(h => (
+                  {["الموظف", "المبلغ", "التاريخ", "السبب", "الاستقطاع الشهري", "شهر المرتب", "المتبقي", "الحالة", "إجراء"].map(h => (
                     <th key={h} className="text-right px-4 py-3 text-xs font-medium text-gray-500">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
+                  <tr><td colSpan={9} className="text-center py-8 text-gray-400">جاري التحميل...</td></tr>
                 ) : advances.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">لا توجد سلف مسجلة</td></tr>
+                  <tr><td colSpan={9} className="text-center py-8 text-gray-400">لا توجد سلف مسجلة</td></tr>
                 ) : advances.map((adv, idx) => (
                   <tr key={adv.id} className={cn("border-b hover:bg-gray-50/50", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
                     <td className="px-4 py-3.5 font-medium text-gray-800">{adv.employeeName ?? "—"}</td>
@@ -1154,6 +1224,16 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
                     <td className="px-4 py-3.5 text-gray-600">{fmt(adv.advanceDate)}</td>
                     <td className="px-4 py-3.5 text-gray-500 text-xs">{adv.reason ?? "—"}</td>
                     <td className="px-4 py-3.5 text-orange-600">{adv.monthlyDeduction.toLocaleString()} ج.م</td>
+                    <td className="px-4 py-3.5">
+                      {adv.salaryMonth && adv.salaryYear ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">
+                          <Calendar className="w-3 h-3" />
+                          {adv.salaryYear}/{String(adv.salaryMonth).padStart(2, "0")}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3.5 font-medium">
                       {(adv.remainingAmount ?? 0) > 0
                         ? <span className="text-orange-700">{(adv.remainingAmount ?? 0).toLocaleString()} ج.م</span>
@@ -1251,6 +1331,25 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
               <Input type="number" dir="rtl" value={advForm.deductMonths} onChange={e => setAdvForm({ ...advForm, deductMonths: e.target.value })} min="1" className="border-gray-200" />
             </div>
             <div className="col-span-2 space-y-1.5">
+              <Label className="flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                تُستقطع من مرتب شهر (اختياري)
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={advForm.salaryMonth} onValueChange={v => setAdvForm({ ...advForm, salaryMonth: v })}>
+                  <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="الشهر" /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {Array.from({length:12},(_,i)=>i+1).map(m=>(
+                      <SelectItem key={m} value={String(m)}>{String(m).padStart(2,"0")}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input type="number" dir="rtl" placeholder={String(new Date().getFullYear())}
+                  value={advForm.salaryYear} onChange={e => setAdvForm({ ...advForm, salaryYear: e.target.value })}
+                  className="border-gray-200" />
+              </div>
+            </div>
+            <div className="col-span-2 space-y-1.5">
               <Label>السبب</Label>
               <Input dir="rtl" value={advForm.reason} onChange={e => setAdvForm({ ...advForm, reason: e.target.value })} className="border-gray-200" />
             </div>
@@ -1281,6 +1380,25 @@ function AdvancesTab({ employees }: { employees: EmployeeMini[] }) {
             <div className="space-y-1.5">
               <Label>عدد أشهر الاستقطاع</Label>
               <Input type="number" dir="rtl" value={editAdvForm.deductMonths} onChange={e => setEditAdvForm({ ...editAdvForm, deductMonths: e.target.value })} min="1" className="border-gray-200" />
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label className="flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                تُستقطع من مرتب شهر (اختياري)
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={editAdvForm.salaryMonth} onValueChange={v => setEditAdvForm({ ...editAdvForm, salaryMonth: v })}>
+                  <SelectTrigger dir="rtl" className="border-gray-200"><SelectValue placeholder="الشهر" /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {Array.from({length:12},(_,i)=>i+1).map(m=>(
+                      <SelectItem key={m} value={String(m)}>{String(m).padStart(2,"0")}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input type="number" dir="rtl" placeholder={String(new Date().getFullYear())}
+                  value={editAdvForm.salaryYear} onChange={e => setEditAdvForm({ ...editAdvForm, salaryYear: e.target.value })}
+                  className="border-gray-200" />
+              </div>
             </div>
             <div className="col-span-2 space-y-1.5">
               <Label>السبب</Label>
@@ -1424,7 +1542,7 @@ export function Employees() {
   const [viewTarget, setViewTarget] = useState<EmployeeRow | null>(null);
   const [editTarget, setEditTarget] = useState<EmployeeRow | null>(null);
   const [editForm, setEditForm] = useState({ fullName: "", arName: "", nationalId: "", jobTitleId: "", phone: "", email: "", salary: "", status: "active" });
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useSessionFilter("emp_search", "");
 
   const emptyAddForm = {
     fullName: "", arName: "", nationalId: "", userName: "", email: "", phone: "",
@@ -1535,7 +1653,7 @@ export function Employees() {
   const filtered = employees.filter(e =>
     e.name.includes(search) || e.role.includes(search) || e.phone.includes(search)
   );
-  const pager = usePagination(filtered, 12);
+  const pager = usePagination(filtered, 50);
 
   const openEdit = (emp: EmployeeRow) => {
     setEditTarget(emp);

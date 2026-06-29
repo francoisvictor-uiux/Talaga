@@ -7,6 +7,8 @@ function unwrap<T>(res: ServiceResult<T>, fallback: string): T {
   return res.data as T;
 }
 
+export type BillingMethod = "PerDay" | "PerMonth";
+
 export type BackendCustomerPrice = {
   id: string;
   customerId: string;
@@ -14,6 +16,7 @@ export type BackendCustomerPrice = {
   itemName: string;
   pricePerDay: number;
   pricePerMonth: number;
+  billingMethod: BillingMethod;
   notes?: string | null;
   isActive: boolean;
   creationDate: string;
@@ -25,6 +28,7 @@ export type AddCustomerPricePayload = {
   itemName: string;
   pricePerDay: number;
   pricePerMonth: number;
+  billingMethod: BillingMethod;
   notes?: string;
 };
 

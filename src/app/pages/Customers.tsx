@@ -68,6 +68,8 @@ import {
   type BackendCustomerType,
 } from "../services/customerTypeService";
 
+import { generateOpeningBalanceInvoice } from "../services/invoiceService";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { PageHeader } from "../components/layout/PageHeader";
 
 type CustomerView = {
@@ -276,12 +278,17 @@ function CustomerCard({
               <Phone className="w-3 h-3 flex-shrink-0" />
               <span>{c.phone}</span>
             </div>
-            <div className="flex justify-between text-gray-500">
-              <span>الأصناف الثلاجةة</span>
-              <span className="font-medium text-gray-700">{c.itemsStored} طرد</span>
+            <div className="flex justify-between items-center text-gray-500">
+              <span>رصيد المخزون</span>
+              <span className={cn(
+                "font-semibold text-xs px-2 py-0.5 rounded",
+                c.itemsStored > 0 ? "text-cyan-700 bg-cyan-100" : "text-gray-400 bg-gray-100",
+              )}>
+                {c.itemsStored.toLocaleString("ar-EG")} طرد
+              </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-gray-500">الرصيد</span>
+              <span className="text-gray-500">الرصيد المالي</span>
               <div className="flex items-center gap-1">
                 <span className={cn("font-semibold transition-all", c.balance >= 0 ? "text-green-600" : "text-red-500", !showBalance && "blur-sm select-none")}>
                   {c.balance.toLocaleString("ar-EG")} ج.م
@@ -405,18 +412,15 @@ export function Customers() {
       .catch(() => {});
   }, []);
 
-  const customers = useMemo<CustomerView[]>(
-    () => rawCustomers.filter(c => c.isActive).map(mapCustomer),
-    [rawCustomers],
-  );
-
-  /* All movements loaded once for item/brand filter mapping */
+  /* All movements loaded once for item/brand filter mapping + stored-stock balances */
   const [allMovements, setAllMovements] = useState<BackendMovement[]>([]);
 
-  /* Build customer→items and customer→brands maps from all movements */
-  const { custItemMap, custBrandMap, filterItemOpts, filterBrandOpts } = useMemo(() => {
+  /* Build customer→items and customer→brands maps + per-customer stored quantity from all movements */
+  const { custItemMap, custBrandMap, custStoredMap, custFeesMap, filterItemOpts, filterBrandOpts } = useMemo(() => {
     const ciMap = new Map<string, Set<string>>();   // customerId → itemIds
     const cbMap = new Map<string, Set<string>>();   // customerId → brandKey
+    const csMap = new Map<string, number>();         // customerId → stored qty (incoming − outgoing)
+    const cfMap = new Map<string, number>();         // customerId → accumulated fees (naulage + opening + pre-cooling)
     const itemNames = new Map<string, string>();     // itemId → name
     const brandNames = new Map<string, string>();    // brandId|name → display name
 
@@ -434,17 +438,41 @@ export function Customers() {
         cbMap.get(cid)!.add(bKey);
         brandNames.set(bKey, m.brandName || bKey);
       }
+      if (m.isActive) {
+        const q = m.quantity ?? 0;
+        const prev = csMap.get(cid) ?? 0;
+        if (m.movementType === "Incoming") csMap.set(cid, prev + q);
+        else if (m.movementType === "Outgoing") csMap.set(cid, prev - q);
+        const fee = ((m.naulagePerUnit ?? 0) * q) + (m.openingFee ?? 0) + (m.preCoolingFee ?? 0);
+        cfMap.set(cid, (cfMap.get(cid) ?? 0) + fee);
+      }
     }
     return {
       custItemMap: ciMap,
       custBrandMap: cbMap,
+      custStoredMap: csMap,
+      custFeesMap: cfMap,
       filterItemOpts: [...itemNames.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ar")),
       filterBrandOpts: [...brandNames.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "ar")),
     };
   }, [allMovements]);
 
+  const customers = useMemo<CustomerView[]>(
+    () => rawCustomers.filter(c => c.isActive).map(c => {
+      const base = mapCustomer(c);
+      // Financial balance, consistent with the statement page: opening − accumulated fees
+      const balance = base.openingBalance - (custFeesMap.get(c.id) ?? 0);
+      return {
+        ...base,
+        balance,
+        itemsStored: Math.max(0, custStoredMap.get(c.id) ?? 0),
+      };
+    }),
+    [rawCustomers, custStoredMap, custFeesMap],
+  );
+
   const [view, setView]                     = useState<"grid" | "list">("list");
-  const [search, setSearch]                 = useState("");
+  const [search, setSearch, resetSearch]    = useSessionFilter("cust_search", "");
   const [revealedBalances, setRevealedBalances] = useState<Set<string>>(new Set());
   const toggleBalance = (id: string) => setRevealedBalances(prev => {
     const next = new Set(prev);
@@ -456,13 +484,13 @@ export function Customers() {
 
   /* ── Filters ── */
   const [showFilters, setShowFilters]       = useState(false);
-  const [balanceFilter, setBalanceFilter]   = useState<"all" | "positive" | "negative">("all");
-  const [typeFilter, setTypeFilter]         = useState("all");
-  const [itemFilter, setItemFilter]         = useState("all");
-  const [brandFilter, setBrandFilter]       = useState("all");
+  const [balanceFilter, setBalanceFilter, resetBalance] = useSessionFilter<"all" | "positive" | "negative">("cust_balance", "all");
+  const [typeFilter, setTypeFilter, resetType]           = useSessionFilter("cust_type", "all");
+  const [itemFilter, setItemFilter, resetItem]           = useSessionFilter("cust_item", "all");
+  const [brandFilter, setBrandFilter, resetBrand]        = useSessionFilter("cust_brand", "all");
 
   const clearFilters = () => {
-    setBalanceFilter("all"); setTypeFilter("all"); setItemFilter("all"); setBrandFilter("all");
+    resetSearch(); resetBalance(); resetType(); resetItem(); resetBrand();
   };
   const activeFilterCount = [balanceFilter !== "all", typeFilter !== "all", itemFilter !== "all", brandFilter !== "all"].filter(Boolean).length;
 
@@ -576,7 +604,7 @@ export function Customers() {
       setSharedAddItemId(""); setSharedAddBrands([]); setSharedAddBrandId(""); setSharedAddBrandName(""); setSharedAddUnit(DEFAULT_NAULAGE_UNIT);
       setShowAddNaulage(false); setShowAddPrice(false);
       setAddNaulageForm({ itemName: "", itemId: "", naulage: "", naulageUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
-      setAddPriceForm({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
+      setAddPriceForm({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", billingMethod: "PerMonth", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
       return;
     }
     let cancelled = false;
@@ -632,9 +660,9 @@ export function Customers() {
 
   /* ── Special Pricing (View Dialog) ── */
   const [showAddPrice, setShowAddPrice] = useState(false);
-  const [addPriceForm, setAddPriceForm] = useState({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
+  const [addPriceForm, setAddPriceForm] = useState({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", billingMethod: "PerMonth" as "PerDay"|"PerMonth", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
   const [editPrice, setEditPrice] = useState<BackendCustomerPrice | null>(null);
-  const [editPriceForm, setEditPriceForm] = useState({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", priceUnit: DEFAULT_NAULAGE_UNIT });
+  const [editPriceForm, setEditPriceForm] = useState({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", billingMethod: "PerMonth" as "PerDay"|"PerMonth", priceUnit: DEFAULT_NAULAGE_UNIT });
 
   /* ── Shared item + brand + unit between naulage & pricing add forms ── */
   const [sharedAddItemId, setSharedAddItemId] = useState("");
@@ -672,12 +700,15 @@ export function Customers() {
       const otherLabel = fromTab === "naulage" ? "الأسعار" : "النولون";
       if (!window.confirm(`تغيير الصنف سيؤثر أيضاً على نموذج ${otherLabel}.\nهل تريد المتابعة؟`)) return;
     }
+    const itemDefaults = items.find(i => i.id === newItemId);
+    const defNaulageUnit = itemDefaults?.defaultNaulageUnit || DEFAULT_NAULAGE_UNIT;
+    const defNaulage = itemDefaults?.defaultNaulage != null ? String(itemDefaults.defaultNaulage) : "";
     setSharedAddItemId(newItemId);
     setSharedAddBrandId("");
     setSharedAddBrandName("");
-    setSharedAddUnit(DEFAULT_NAULAGE_UNIT);
-    setAddNaulageForm(prev => ({ ...prev, itemId: newItemId, itemName: newItemName, brandId: "", brandName: "", naulageUnit: DEFAULT_NAULAGE_UNIT }));
-    setAddPriceForm(prev => ({ ...prev, itemId: newItemId, itemName: newItemName, brandId: "", brandName: "", priceUnit: DEFAULT_NAULAGE_UNIT }));
+    setSharedAddUnit(defNaulageUnit);
+    setAddNaulageForm(prev => ({ ...prev, itemId: newItemId, itemName: newItemName, brandId: "", brandName: "", naulage: defNaulage, naulageUnit: defNaulageUnit }));
+    setAddPriceForm(prev => ({ ...prev, itemId: newItemId, itemName: newItemName, brandId: "", brandName: "", priceUnit: defNaulageUnit }));
     void loadSharedBrands(newItemId);
   };
 
@@ -702,6 +733,7 @@ export function Customers() {
       itemId: p.itemId ?? "",
       pricePerDay: String(p.pricePerDay ?? ""),
       pricePerMonth: String(p.pricePerMonth ?? ""),
+      billingMethod: (p.billingMethod as "PerDay"|"PerMonth") || "PerMonth",
       priceUnit: unit || DEFAULT_NAULAGE_UNIT,
     });
     setEditPriceBrandId("");
@@ -728,6 +760,7 @@ export function Customers() {
         itemName: editPriceForm.itemName,
         pricePerDay: Number(editPriceForm.pricePerDay) || 0,
         pricePerMonth: Number(editPriceForm.pricePerMonth) || 0,
+        billingMethod: editPriceForm.billingMethod,
         notes: encodeExtraNotes(editPriceBrandName, editPriceForm.priceUnit, ""),
         isActive: true,
       });
@@ -752,7 +785,7 @@ export function Customers() {
     });
   }, [customers, search, balanceFilter, typeFilter, itemFilter, brandFilter, custItemMap, custBrandMap]);
 
-  const pager = usePagination(filtered, view === "grid" ? 12 : 10);
+  const pager = usePagination(filtered, 50);
 
   /* ── Handlers ── */
   const handleSave = async () => {
@@ -1239,8 +1272,8 @@ export function Customers() {
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">كود العميل</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">اسم العميل</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الهاتف</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الرصيد</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الاصناف الثلاجةة</th>
+                    <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الرصيد المالي</th>
+                    <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">رصيد المخزون</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">المندوب</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الإجراءات</th>
                   </tr>
@@ -1264,10 +1297,13 @@ export function Customers() {
                       >
                         <td className="px-4 py-3.5 font-mono text-xs text-blue-600">{c.code}</td>
                         <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-2.5">
+                          <button
+                            className="flex items-center gap-2.5 text-right hover:text-blue-600 transition-colors group"
+                            onClick={() => setSelectedCustomer(c)}
+                          >
                             <CustomerAvatar c={c as any} size="sm" />
-                            <span className="font-medium text-gray-800">{c.name}</span>
-                          </div>
+                            <span className="font-medium text-gray-800 group-hover:underline">{c.name}</span>
+                          </button>
                         </td>
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-1 text-gray-600">
@@ -1288,16 +1324,24 @@ export function Customers() {
                             </button>
                           </div>
                         </td>
-                        <td className="px-4 py-3.5 text-gray-600">{c.itemsStored} طرد</td>
+                        <td className="px-4 py-3.5">
+                          <span className={cn(
+                            "inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded",
+                            c.itemsStored > 0 ? "text-cyan-700 bg-cyan-100" : "text-gray-400 bg-gray-100",
+                          )}>
+                            {c.itemsStored.toLocaleString("ar-EG")} طرد
+                          </span>
+                        </td>
                         <td className="px-4 py-3.5 text-gray-600">{c.agent}</td>
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-2">
                             <button
-                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                              onClick={() => setSelectedCustomer(c)}
+                              className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                              onClick={() => navigate(`/invoices?customer=${c.id}`)}
+                              title="فواتير العميل"
                             >
-                              <Eye className="w-5 h-5" />
-                              <span className="text-[10px] font-medium whitespace-nowrap">بيانات العميل</span>
+                              <FileText className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">الفواتير</span>
                             </button>
                             <button
                               className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
@@ -1670,8 +1714,8 @@ export function Customers() {
                             <tr className="bg-emerald-50 rounded">
                               <th className="text-right p-2.5 text-xs text-gray-500">الصنف</th>
                               <th className="text-right p-2.5 text-xs text-gray-500">الماركة</th>
-                              <th className="text-right p-2.5 text-xs text-gray-500">سعر اليوم</th>
-                              <th className="text-right p-2.5 text-xs text-gray-500">سعر الشهر</th>
+                              <th className="text-right p-2.5 text-xs text-gray-500">طريقة الاحتساب</th>
+                              <th className="text-right p-2.5 text-xs text-gray-500">السعر</th>
                               <th className="text-right p-2.5 text-xs text-gray-500">الوحدة</th>
                               <th className="text-right p-2.5 text-xs text-gray-500">إجراء</th>
                             </tr>
@@ -1685,8 +1729,16 @@ export function Customers() {
                                   <td className="p-2.5">
                                     {brandName ? <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded">{brandName}</span> : <span className="text-gray-300 text-xs">—</span>}
                                   </td>
-                                  <td className="p-2.5"><span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold">{p.pricePerDay} ج.م</span></td>
-                                  <td className="p-2.5"><span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold">{p.pricePerMonth} ج.م</span></td>
+                                  <td className="p-2.5">
+                                    {p.billingMethod === "PerDay"
+                                      ? <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">باليوم</span>
+                                      : <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded font-medium">بالشهر</span>}
+                                  </td>
+                                  <td className="p-2.5">
+                                    {p.billingMethod === "PerDay"
+                                      ? <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold">{p.pricePerDay} ج.م/يوم</span>
+                                      : <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-semibold">{p.pricePerMonth} ج.م/شهر</span>}
+                                  </td>
                                   <td className="p-2.5"><span className="text-xs text-gray-600">/ {unit || DEFAULT_NAULAGE_UNIT}</span></td>
                                   <td className="p-2.5">
                                     <div className="flex items-center gap-1">
@@ -1759,22 +1811,27 @@ export function Customers() {
                                 </SelectContent>
                               </Select>
                             </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">سعر اليوم (ج.م)</Label>
-                              <Input
-                                type="number" dir="rtl" placeholder="0"
-                                value={addPriceForm.pricePerDay}
-                                onChange={e => setAddPriceForm({ ...addPriceForm, pricePerDay: e.target.value })}
-                              />
+                            <div className="col-span-2 space-y-1">
+                              <Label className="text-xs">طريقة الاحتساب *</Label>
+                              <Select value={addPriceForm.billingMethod} onValueChange={v => setAddPriceForm({ ...addPriceForm, billingMethod: v as "PerDay"|"PerMonth" })}>
+                                <SelectTrigger dir="rtl"><SelectValue /></SelectTrigger>
+                                <SelectContent dir="rtl">
+                                  <SelectItem value="PerMonth">بالشهر — أي جزء من الشهر = شهر كامل</SelectItem>
+                                  <SelectItem value="PerDay">باليوم — الاحتساب بعدد الأيام الفعلية</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">سعر الشهر (ج.م)</Label>
-                              <Input
-                                type="number" dir="rtl" placeholder="0"
-                                value={addPriceForm.pricePerMonth}
-                                onChange={e => setAddPriceForm({ ...addPriceForm, pricePerMonth: e.target.value })}
-                              />
-                            </div>
+                            {addPriceForm.billingMethod === "PerDay" ? (
+                              <div className="col-span-2 space-y-1">
+                                <Label className="text-xs">سعر اليوم (ج.م) *</Label>
+                                <Input type="number" dir="rtl" placeholder="0" value={addPriceForm.pricePerDay} onChange={e => setAddPriceForm({ ...addPriceForm, pricePerDay: e.target.value })} />
+                              </div>
+                            ) : (
+                              <div className="col-span-2 space-y-1">
+                                <Label className="text-xs">سعر الشهر (ج.م) *</Label>
+                                <Input type="number" dir="rtl" placeholder="0" value={addPriceForm.pricePerMonth} onChange={e => setAddPriceForm({ ...addPriceForm, pricePerMonth: e.target.value })} />
+                              </div>
+                            )}
                             <div className="col-span-2 space-y-1">
                               <Label className="text-xs">الوحدة</Label>
                               <Select
@@ -1793,7 +1850,8 @@ export function Customers() {
                               onClick={async () => {
                                 if (!selectedCustomer) return;
                                 if (!addPriceForm.itemName) { toast.error("اختر الصنف"); return; }
-                                if (!addPriceForm.pricePerDay && !addPriceForm.pricePerMonth) { toast.error("أدخل سعر اليوم أو الشهر"); return; }
+                                if (addPriceForm.billingMethod === "PerDay" && !addPriceForm.pricePerDay) { toast.error("أدخل سعر اليوم"); return; }
+                                if (addPriceForm.billingMethod === "PerMonth" && !addPriceForm.pricePerMonth) { toast.error("أدخل سعر الشهر"); return; }
                                 try {
                                   await apiAddPrice({
                                     customerId: selectedCustomer.id,
@@ -1801,10 +1859,11 @@ export function Customers() {
                                     itemName: addPriceForm.itemName,
                                     pricePerDay: Number(addPriceForm.pricePerDay) || 0,
                                     pricePerMonth: Number(addPriceForm.pricePerMonth) || 0,
+                                    billingMethod: addPriceForm.billingMethod,
                                     notes: encodeExtraNotes(addPriceForm.brandName, addPriceForm.priceUnit, ""),
                                   });
                                   toast.success(`تم إضافة سعر "${addPriceForm.itemName}"${addPriceForm.brandName ? ` - ${addPriceForm.brandName}` : ""}`);
-                                  setAddPriceForm({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
+                                  setAddPriceForm({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", billingMethod: "PerMonth", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" });
                                   setShowAddPrice(false);
                                   await reloadCustomerSubEntities(selectedCustomer.id);
                                 } catch (err: any) {
@@ -1816,7 +1875,7 @@ export function Customers() {
                               حفظ
                             </button>
                             <button
-                              onClick={() => { setShowAddPrice(false); setAddPriceForm({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" }); }}
+                              onClick={() => { setShowAddPrice(false); setAddPriceForm({ itemName: "", itemId: "", pricePerDay: "", pricePerMonth: "", billingMethod: "PerMonth", priceUnit: DEFAULT_NAULAGE_UNIT, brandId: "", brandName: "" }); }}
                               className="px-4 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition-colors"
                             >
                               إلغاء
@@ -1948,6 +2007,21 @@ export function Customers() {
                               </button>
                             )}
                           </div>
+                          {!editingOpeningBal && selectedCustomer.openingBalance !== 0 && (
+                            <button
+                              className="mt-0.5 text-[10px] text-blue-600 hover:text-blue-700 flex items-center gap-0.5"
+                              onClick={async () => {
+                                try {
+                                  await generateOpeningBalanceInvoice(selectedCustomer.id);
+                                  toast.success("تم إنشاء فاتورة الرصيد الافتتاحي");
+                                  navigate(`/invoices?customer=${selectedCustomer.id}`);
+                                } catch (err: any) { toast.error(err?.message ?? "فشل إنشاء الفاتورة"); }
+                              }}
+                              title="إنشاء فاتورة للرصيد الافتتاحي"
+                            >
+                              <FileText className="w-2.5 h-2.5" />إنشاء فاتورة
+                            </button>
+                          )}
                           {editingOpeningBal ? (
                             <div className="flex items-center gap-1 mt-1">
                               <input
@@ -2637,20 +2711,31 @@ export function Customers() {
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>طريقة الاحتساب *</Label>
+              <Select value={editPriceForm.billingMethod} onValueChange={v => setEditPriceForm({ ...editPriceForm, billingMethod: v as "PerDay"|"PerMonth" })}>
+                <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"><SelectValue /></SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="PerMonth">بالشهر — أي جزء من الشهر = شهر كامل</SelectItem>
+                  <SelectItem value="PerDay">باليوم — الاحتساب بعدد الأيام الفعلية</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {editPriceForm.billingMethod === "PerDay" ? (
               <div className="space-y-1.5">
-                <Label>سعر اليوم (ج.م)</Label>
+                <Label>سعر اليوم (ج.م) *</Label>
                 <Input type="number" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
                   value={editPriceForm.pricePerDay}
                   onChange={e => setEditPriceForm({ ...editPriceForm, pricePerDay: e.target.value })} />
               </div>
+            ) : (
               <div className="space-y-1.5">
-                <Label>سعر الشهر (ج.م)</Label>
+                <Label>سعر الشهر (ج.م) *</Label>
                 <Input type="number" dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]"
                   value={editPriceForm.pricePerMonth}
                   onChange={e => setEditPriceForm({ ...editPriceForm, pricePerMonth: e.target.value })} />
               </div>
-            </div>
+            )}
             <div className="space-y-1.5">
               <Label>الوحدة</Label>
               <Select value={editPriceForm.priceUnit} onValueChange={v => setEditPriceForm({ ...editPriceForm, priceUnit: v })}>

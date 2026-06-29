@@ -5,7 +5,7 @@ import {
   ArrowLeftRight, ClipboardList,
   BarChart3, CheckSquare, Shield, Settings,
   ChevronRight, Snowflake, LogOut,
-  BookOpen, Landmark
+  BookOpen, Landmark, FileText
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
@@ -18,6 +18,7 @@ const navItems = [
   { path: "/customers", label: "العملاء", icon: Users },
   { path: "/employees", label: "الموظفون", icon: UserCheck },
   { path: "/movements", label: "الحركات", icon: ArrowLeftRight, color: "text-blue-300" },
+  { path: "/invoices",  label: "الفواتير", icon: FileText, color: "text-emerald-300" },
   { path: "/inventory", label: "الجرد والتسويات", icon: ClipboardList },
   { path: "/reports", label: "التقارير", icon: BarChart3 },
   { path: "/tasks", label: "قائمة المهام", icon: CheckSquare },

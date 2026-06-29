@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { Settings as SettingsIcon, Building2, Printer, Shield, Database, Palette, Save, Upload, MessageCircle, Check } from "lucide-react";
+import { Settings as SettingsIcon, Building2, Printer, Shield, Database, Palette, Save, Upload, MessageCircle, Check, Table2, GripVertical, RotateCcw } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -13,6 +13,13 @@ import { Slider } from "../components/ui/slider";
 import { Separator } from "../components/ui/separator";
 import { cn } from "../components/ui/utils";
 import { toast } from "sonner";
+import {
+  INCOMING_COLS, OUTGOING_COLS,
+  INCOMING_COL_KEY, OUTGOING_COL_KEY,
+  SETTING_KEY_INCOMING, SETTING_KEY_OUTGOING,
+  defaultIncomingOrder, defaultOutgoingOrder,
+  resolveOrder, parseOrder,
+} from "../config/movementColumns";
 import { useTheme, THEMES, type ThemeKey } from "../context/ThemeContext";
 import {
   getAllSettings,
@@ -25,11 +32,12 @@ import { SafeImage } from "../components/ui/SafeImage";
 import { validatePhoneOptional, PHONE_PLACEHOLDER } from "../utils/phone";
 
 const settingsTabs = [
-  { id: "company", label: "بيانات الشركة", icon: Building2 },
-  { id: "notifications", label: "الإشعارات", icon: MessageCircle },
-  { id: "printing", label: "إعدادات الطباعة", icon: Printer },
-  { id: "backup", label: "النسخ الاحتياطي", icon: Database },
-  { id: "appearance", label: "المظهر", icon: Palette },
+  { id: "company",      label: "بيانات الشركة",    icon: Building2 },
+  { id: "notifications",label: "الإشعارات",         icon: MessageCircle },
+  { id: "printing",     label: "إعدادات الطباعة",  icon: Printer },
+  { id: "backup",       label: "النسخ الاحتياطي",  icon: Database },
+  { id: "appearance",   label: "المظهر",            icon: Palette },
+  { id: "movements",    label: "جداول الحركات",     icon: Table2 },
 ];
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.07 } } };
@@ -111,6 +119,82 @@ export function Settings() {
       }
     }, 120);
   };
+
+  /* ── Column order state ── */
+  const [incomingOrder, setIncomingOrder] = useState<string[]>(() =>
+    resolveOrder(INCOMING_COL_KEY, defaultIncomingOrder()));
+  const [outgoingOrder, setOutgoingOrder] = useState<string[]>(() =>
+    resolveOrder(OUTGOING_COL_KEY, defaultOutgoingOrder()));
+  const dragSrc = useRef<{ table: "incoming" | "outgoing"; idx: number } | null>(null);
+
+  // Once backend settings load, hydrate from DB (overrides localStorage)
+  useEffect(() => {
+    if (loading) return;
+    const dbIn = values[SETTING_KEY_INCOMING];
+    const dbOut = values[SETTING_KEY_OUTGOING];
+    if (dbIn) setIncomingOrder(parseOrder(dbIn, defaultIncomingOrder()));
+    if (dbOut) setOutgoingOrder(parseOrder(dbOut, defaultOutgoingOrder()));
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveColOrder = async () => {
+    const inJson = JSON.stringify(incomingOrder);
+    const outJson = JSON.stringify(outgoingOrder);
+    try {
+      await updateSettingsBatch([
+        { key: SETTING_KEY_INCOMING, value: inJson },
+        { key: SETTING_KEY_OUTGOING, value: outJson },
+      ]);
+      // mirror to localStorage so Movements page picks it up instantly
+      localStorage.setItem(INCOMING_COL_KEY, inJson);
+      localStorage.setItem(OUTGOING_COL_KEY, outJson);
+      window.dispatchEvent(new StorageEvent("storage", { key: INCOMING_COL_KEY }));
+      window.dispatchEvent(new StorageEvent("storage", { key: OUTGOING_COL_KEY }));
+      toast.success("تم حفظ ترتيب الأعمدة");
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حفظ الترتيب");
+    }
+  };
+
+  const resetColOrder = async () => {
+    const i = defaultIncomingOrder();
+    const o = defaultOutgoingOrder();
+    setIncomingOrder(i);
+    setOutgoingOrder(o);
+    const inJson = JSON.stringify(i);
+    const outJson = JSON.stringify(o);
+    try {
+      await updateSettingsBatch([
+        { key: SETTING_KEY_INCOMING, value: inJson },
+        { key: SETTING_KEY_OUTGOING, value: outJson },
+      ]);
+      localStorage.setItem(INCOMING_COL_KEY, inJson);
+      localStorage.setItem(OUTGOING_COL_KEY, outJson);
+      window.dispatchEvent(new StorageEvent("storage", { key: INCOMING_COL_KEY }));
+      toast.success("تم إعادة الترتيب الافتراضي");
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل الإعادة");
+    }
+  };
+
+  const onDragStart = (table: "incoming" | "outgoing", idx: number) => {
+    dragSrc.current = { table, idx };
+  };
+
+  const onDrop = (table: "incoming" | "outgoing", dropIdx: number) => {
+    if (!dragSrc.current || dragSrc.current.table !== table) return;
+    const srcIdx = dragSrc.current.idx;
+    if (srcIdx === dropIdx) return;
+    const setter = table === "incoming" ? setIncomingOrder : setOutgoingOrder;
+    setter(prev => {
+      const arr = [...prev];
+      const [item] = arr.splice(srcIdx, 1);
+      arr.splice(dropIdx, 0, item);
+      return arr;
+    });
+    dragSrc.current = null;
+  };
+
+  const [dragOverIdx, setDragOverIdx] = useState<{ table: string; idx: number } | null>(null);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -484,6 +568,70 @@ export function Settings() {
                         style={{ background: theme.primary }}
                       >
                         <Save className="w-4 h-4" />تطبيق
+                      </Button>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              )}
+              {activeTab === "movements" && (
+                <motion.div key="movements" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }}>
+                  <Card className="border-0 shadow-sm">
+                    <CardContent className="p-5 space-y-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="font-semibold text-gray-800">ترتيب أعمدة جداول الحركات</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">اسحب وأفلت لتغيير ترتيب الأعمدة — يُطبَّق على الجداول في جميع أنحاء النظام</p>
+                        </div>
+                        <button onClick={resetColOrder} className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 border rounded-lg hover:bg-gray-50 transition-colors">
+                          <RotateCcw className="w-3.5 h-3.5" />إعادة الترتيب الافتراضي
+                        </button>
+                      </div>
+
+                      {/* Incoming table columns */}
+                      {[
+                        { key: "incoming" as const, label: "جدول الوارد", order: incomingOrder, cols: INCOMING_COLS, color: "border-green-200 bg-green-50", badge: "bg-green-100 text-green-700" },
+                        { key: "outgoing" as const, label: "جدول المنصرف", order: outgoingOrder, cols: OUTGOING_COLS, color: "border-red-200 bg-red-50", badge: "bg-red-100 text-red-700" },
+                      ].map(({ key, label, order, cols, color, badge }) => (
+                        <div key={key}>
+                          <div className={cn("flex items-center gap-2 px-3 py-2 rounded-lg border mb-3", color)}>
+                            <Table2 className="w-4 h-4 opacity-60" />
+                            <span className="font-medium text-sm">{label}</span>
+                            <span className={cn("text-[10px] px-2 py-0.5 rounded-full font-medium mr-auto", badge)}>
+                              {order.length} عمود
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {order.map((colId, idx) => {
+                              const col = cols.find(c => c.id === colId);
+                              if (!col) return null;
+                              const isOver = dragOverIdx?.table === key && dragOverIdx.idx === idx;
+                              return (
+                                <div
+                                  key={colId}
+                                  draggable
+                                  onDragStart={() => onDragStart(key, idx)}
+                                  onDragOver={e => { e.preventDefault(); setDragOverIdx({ table: key, idx }); }}
+                                  onDragLeave={() => setDragOverIdx(null)}
+                                  onDrop={() => { onDrop(key, idx); setDragOverIdx(null); }}
+                                  onDragEnd={() => setDragOverIdx(null)}
+                                  className={cn(
+                                    "flex items-center gap-3 px-3 py-2.5 rounded-lg border bg-white cursor-grab active:cursor-grabbing select-none transition-all",
+                                    isOver ? "border-blue-400 bg-blue-50 shadow-md scale-[1.01]" : "border-gray-200 hover:border-gray-300 hover:shadow-sm",
+                                  )}
+                                >
+                                  <GripVertical className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                                  <span className="text-xs font-mono text-gray-400 w-5 text-center">{idx + 1}</span>
+                                  <span className="text-sm text-gray-700 flex-1">{col.label}</span>
+                                  <span className="text-[10px] text-gray-300 font-mono">{colId}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+
+                      <Button onClick={saveColOrder} className="text-white gap-2" style={{ background: theme.primary }}>
+                        <Save className="w-4 h-4" />حفظ الترتيب
                       </Button>
                     </CardContent>
                   </Card>

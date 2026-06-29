@@ -128,6 +128,8 @@ export type BackendAdvance = {
   monthlyDeduction: number;
   reason?: string | null;
   status?: string | null;
+  salaryMonth?: number | null;
+  salaryYear?: number | null;
   creationDate: string;
 };
 
@@ -136,6 +138,8 @@ export type AddAdvancePayload = {
   amount: number;
   installmentsCount?: number;
   reason?: string;
+  salaryMonth?: number;
+  salaryYear?: number;
 };
 
 export async function getAdvances(employeeId?: string): Promise<BackendAdvance[]> {
@@ -153,6 +157,8 @@ export type EditAdvancePayload = {
   amount: number;
   installmentsCount?: number;
   reason?: string;
+  salaryMonth?: number;
+  salaryYear?: number;
   isActive?: boolean;
 };
 

@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { motion, AnimatePresence } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
 import {
@@ -292,7 +293,7 @@ export function Warehouses() {
   const [newWH, setNewWH] = useState({ ...defaultWH });
   const [newCH, setNewCH] = useState({ ...defaultCH });
   const [view, setView] = useState<"grid" | "list">("list");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useSessionFilter("wh_search", "");
 
   /* ── Edit Warehouse State ── */
   type WHRow = WHView;

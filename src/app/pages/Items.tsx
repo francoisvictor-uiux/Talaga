@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { motion } from "motion/react";
 import {
   Plus, Edit, Trash2, Snowflake, Thermometer, Wind,
-  Bell, Search, LayoutGrid, List, Package, X, Tag, Loader2,
+  Bell, Search, LayoutGrid, List, Package, X, Tag, Loader2, DollarSign,
 } from "lucide-react";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -22,7 +23,8 @@ import {
   getAllItems, getAllPackages,
   addItem as apiAddItem, editItem as apiEditItem, deleteItem as apiDeleteItem,
   addPackage as apiAddPkg, editPackage as apiEditPkg, deletePackage as apiDeletePkg,
-  type BackendItem, type BackendPackage,
+  getPriceListsByItem, addPriceList as apiAddPrice, editPriceList as apiEditPrice, deletePriceList as apiDeletePrice,
+  type BackendItem, type BackendPackage, type BackendPriceList,
 } from "../services/itemService";
 import {
   getBrandsByItem, addBrand as apiAddBrand, editBrand as apiEditBrand, deleteBrand as apiDeleteBrand,
@@ -40,6 +42,10 @@ type Item = {
   alertDays: number;
   tempMin?: number;
   tempMax?: number;
+  airingDays?: number;
+  expiryDays?: number;
+  defaultNaulage?: number;
+  defaultNaulageUnit?: string;
   status: "active" | "inactive";
   image: string;
 };
@@ -65,6 +71,10 @@ const itemFromBackend = (i: BackendItem): Item => ({
   alertDays: i.alertDaysBeforeExpiry ?? 0,
   tempMin: i.temperatureMin ?? undefined,
   tempMax: i.temperatureMax ?? undefined,
+  airingDays: i.airingDays ?? undefined,
+  expiryDays: i.expiryDays ?? undefined,
+  defaultNaulage: i.defaultNaulage ?? undefined,
+  defaultNaulageUnit: i.defaultNaulageUnit ?? undefined,
   status: i.isActive ? "active" : "inactive",
   image: i.imageUrl ?? "",
 });
@@ -104,7 +114,7 @@ const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { st
 /* ══════════════════════════════════════════════════════════
    ItemCard
 ══════════════════════════════════════════════════════════ */
-function ItemCard({ it, onDelete, onEdit, onBrands }: { it: Item; onDelete: (it: Item) => void; onEdit: (it: Item) => void; onBrands: (it: Item) => void }) {
+function ItemCard({ it, onDelete, onEdit, onBrands, onPrices }: { it: Item; onDelete: (it: Item) => void; onEdit: (it: Item) => void; onBrands: (it: Item) => void; onPrices: (it: Item) => void }) {
   const cfg = storageConfig[it.storageType] ?? storageConfig["تبريد"];
   const Icon = cfg.icon;
   const alertDay = it.maxDays - it.alertDays;
@@ -134,10 +144,22 @@ function ItemCard({ it, onDelete, onEdit, onBrands }: { it: Item; onDelete: (it:
             <span className="font-mono text-xs bg-gray-100 text-blue-700 px-2 py-0.5 rounded">{it.code}</span>
           </div>
           <div className="space-y-1.5 text-xs text-gray-500 border-t pt-3 flex-1">
+            {it.airingDays != null && (
+              <div className="flex justify-between items-center text-amber-600">
+                <span className="flex items-center gap-1"><Wind className="w-3 h-3" />مدة التنشير</span>
+                <span className="font-medium">{it.airingDays} يوم</span>
+              </div>
+            )}
             <div className="flex justify-between">
-              <span>فترة التخزين</span>
+              <span>مدة التخزين</span>
               <span className="font-medium text-gray-700">{it.maxDays} يوم</span>
             </div>
+            {it.expiryDays != null && (
+              <div className="flex justify-between text-green-700">
+                <span>مدة الصلاحية</span>
+                <span className="font-medium">{it.expiryDays} يوم</span>
+              </div>
+            )}
             <div className="flex justify-between items-center text-orange-600">
               <span className="flex items-center gap-1"><Bell className="w-3 h-3" />تنبيه بعد</span>
               <span className="font-medium">{alertDay} يوم</span>
@@ -151,7 +173,20 @@ function ItemCard({ it, onDelete, onEdit, onBrands }: { it: Item; onDelete: (it:
               </div>
             )}
           </div>
+          {it.defaultNaulage != null && (
+            <div className="flex justify-between items-center text-green-700 text-xs mt-1">
+              <span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />نولون افتراضي</span>
+              <span className="font-medium font-mono">{it.defaultNaulage} / {it.defaultNaulageUnit}</span>
+            </div>
+          )}
           <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t">
+            <button
+              className="p-1.5 text-green-600 hover:bg-green-50 rounded-md transition-colors"
+              onClick={() => onPrices(it)}
+              title="قائمة الأسعار"
+            >
+              <DollarSign className="w-3.5 h-3.5" />
+            </button>
             <button
               className="p-1.5 text-violet-600 hover:bg-violet-50 rounded-md transition-colors"
               onClick={() => onBrands(it)}
@@ -272,20 +307,20 @@ export function Items() {
   const { theme } = useTheme();
   const [itemView, setItemView] = useState<"grid" | "list">("grid");
   const [pkgView,  setPkgView]  = useState<"grid" | "list">("grid");
-  const [itemSearch, setItemSearch] = useState("");
-  const [pkgSearch,  setPkgSearch]  = useState("");
+  const [itemSearch, setItemSearch, resetItemSearch] = useSessionFilter("items_search", "");
+  const [pkgSearch,  setPkgSearch,  resetPkgSearch]  = useSessionFilter("items_pkg_search", "");
   const [showAddItem, setShowAddItem] = useState(false);
   const [showAddPkg,  setShowAddPkg]  = useState(false);
 
   /* Edit state — Items */
   const [editItem, setEditItem] = useState<Item | null>(null);
-  const [editItemForm, setEditItemForm] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
+  const [editItemForm, setEditItemForm] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "", airingDays: "", expiryDays: "", defaultNaulage: "", defaultNaulageUnit: "" });
 
   /* Edit state — Packages */
   const [editPkg, setEditPkg] = useState<Pkg | null>(null);
   const [editPkgForm, setEditPkgForm] = useState({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
 
-  const [newItem, setNewItem] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
+  const [newItem, setNewItem] = useState({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "", airingDays: "", expiryDays: "", defaultNaulage: "", defaultNaulageUnit: "" });
   const [newPkg,  setNewPkg]  = useState({ code: "", type: "", weight: "", length: "", width: "", height: "", image: "" });
 
   /* Brands state */
@@ -297,6 +332,15 @@ export function Items() {
   const [newBrand, setNewBrand] = useState({ name: "", code: "", notes: "" });
   const [editingBrand, setEditingBrand] = useState<BackendBrand | null>(null);
   const [editBrandForm, setEditBrandForm] = useState({ name: "", code: "", notes: "" });
+
+  /* Price list state */
+  const [priceItem, setPriceItem] = useState<Item | null>(null);
+  const [prices, setPrices] = useState<BackendPriceList[]>([]);
+  const [pricesLoading, setPricesLoading] = useState(false);
+  const [showAddPrice, setShowAddPrice] = useState(false);
+  const [newPrice, setNewPrice] = useState({ listName: "Default", price: "", unit: "" , notes: "" });
+  const [editingPrice, setEditingPrice] = useState<BackendPriceList | null>(null);
+  const [editPriceForm, setEditPriceForm] = useState({ listName: "Default", price: "", unit: "", notes: "" });
 
   const { confirmDelete, dialog: confirmDialog } = useConfirmDelete();
 
@@ -310,8 +354,8 @@ export function Items() {
   );
 
   /* Pagination */
-  const itemsPager = usePagination(filteredItems, 8);
-  const pkgsPager  = usePagination(filteredPkgs, 8);
+  const itemsPager = usePagination(filteredItems, 50);
+  const pkgsPager  = usePagination(filteredPkgs, 50);
 
   /* Open edit — Item */
   const openEditItem = (it: Item) => {
@@ -326,6 +370,10 @@ export function Items() {
       tempMin: it.tempMin != null ? String(it.tempMin) : "",
       tempMax: it.tempMax != null ? String(it.tempMax) : "",
       image: it.image ?? "",
+      airingDays: it.airingDays != null ? String(it.airingDays) : "",
+      expiryDays: it.expiryDays != null ? String(it.expiryDays) : "",
+      defaultNaulage: it.defaultNaulage != null ? String(it.defaultNaulage) : "",
+      defaultNaulageUnit: it.defaultNaulageUnit ?? "",
     });
   };
 
@@ -362,6 +410,10 @@ export function Items() {
         temperatureMin: num(editItemForm.tempMin),
         temperatureMax: num(editItemForm.tempMax),
         imageUrl: editItemForm.image || undefined,
+        airingDays: num(editItemForm.airingDays),
+        expiryDays: num(editItemForm.expiryDays),
+        defaultNaulage: num(editItemForm.defaultNaulage),
+        defaultNaulageUnit: editItemForm.defaultNaulageUnit || undefined,
         isActive: true,
       });
       toast.success(`تم تحديث الصنف "${editItemForm.name}" بنجاح`);
@@ -413,10 +465,14 @@ export function Items() {
         temperatureMin: num(newItem.tempMin),
         temperatureMax: num(newItem.tempMax),
         imageUrl: newItem.image || undefined,
+        airingDays: num(newItem.airingDays),
+        expiryDays: num(newItem.expiryDays),
+        defaultNaulage: num(newItem.defaultNaulage),
+        defaultNaulageUnit: newItem.defaultNaulageUnit || undefined,
       });
       toast.success(`تم إضافة الصنف "${newItem.name}" بنجاح`);
       setShowAddItem(false);
-      setNewItem({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "" });
+      setNewItem({ prefix: "", code: "", name: "", storageType: "", maxDays: "", alertDays: "", tempMin: "", tempMax: "", image: "", airingDays: "", expiryDays: "", defaultNaulage: "", defaultNaulageUnit: "" });
       await reload();
     } catch (err: any) {
       toast.error(err?.message ?? "فشل الإضافة");
@@ -531,6 +587,66 @@ export function Items() {
     !brandSearch || b.name.includes(brandSearch) || (b.code ?? "").includes(brandSearch)
   );
 
+  /* ── Price list handlers ── */
+  const loadPrices = async (itemId: string) => {
+    setPricesLoading(true);
+    try {
+      setPrices(await getPriceListsByItem(itemId));
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحميل قائمة الأسعار");
+    } finally {
+      setPricesLoading(false);
+    }
+  };
+
+  const openPrices = (it: Item) => {
+    setPriceItem(it);
+    void loadPrices(it.id);
+  };
+
+  const handleSaveNewPrice = async () => {
+    if (!priceItem) return;
+    if (!newPrice.unit) { toast.error("يرجى اختيار الوحدة"); return; }
+    if (newPrice.price === "" || isNaN(Number(newPrice.price))) { toast.error("يرجى إدخال سعر صحيح"); return; }
+    try {
+      await apiAddPrice({ itemId: priceItem.id, listName: newPrice.listName, price: Number(newPrice.price), unit: newPrice.unit, notes: newPrice.notes || undefined });
+      toast.success("تم إضافة السعر بنجاح");
+      setShowAddPrice(false);
+      setNewPrice({ listName: "Default", price: "", unit: "", notes: "" });
+      void loadPrices(priceItem.id);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل إضافة السعر");
+    }
+  };
+
+  const openEditPrice = (p: BackendPriceList) => {
+    setEditingPrice(p);
+    setEditPriceForm({ listName: p.listName, price: String(p.price), unit: p.unit, notes: p.notes ?? "" });
+  };
+
+  const handleSaveEditPrice = async () => {
+    if (!editingPrice || !priceItem) return;
+    if (!editPriceForm.unit) { toast.error("يرجى اختيار الوحدة"); return; }
+    try {
+      await apiEditPrice({ id: editingPrice.id, itemId: priceItem.id, listName: editPriceForm.listName, price: Number(editPriceForm.price), unit: editPriceForm.unit, notes: editPriceForm.notes || undefined, isActive: true });
+      toast.success("تم تحديث السعر بنجاح");
+      setEditingPrice(null);
+      void loadPrices(priceItem.id);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل تحديث السعر");
+    }
+  };
+
+  const handleDeletePrice = async (p: BackendPriceList) => {
+    try {
+      await apiDeletePrice(p.id);
+      toast.success("تم حذف السعر");
+      void loadPrices(priceItem!.id);
+    } catch (err: any) {
+      toast.error(err?.message ?? "فشل حذف السعر");
+    }
+  };
+
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
       <Tabs defaultValue="items" dir="rtl">
@@ -594,6 +710,7 @@ export function Items() {
                           it={it}
                           onEdit={openEditItem}
                           onBrands={openBrands}
+                          onPrices={openPrices}
                           onDelete={it => confirmDelete(it.name, () => { void handleDeleteItem(it); })}
                         />
                       ))}
@@ -620,6 +737,7 @@ export function Items() {
                         <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">احتياج التخزين</th>
                         <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">فترة التخزين</th>
                         <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">التنبيه</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">النولون الافتراضي</th>
                         <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">الحالة</th>
                         <th className="text-right px-4 py-3 text-xs font-medium text-gray-500">إجراءات</th>
                       </tr>
@@ -627,7 +745,7 @@ export function Items() {
                     <tbody>
                       {itemsPager.paginated.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="text-center py-12 text-gray-400">
+                          <td colSpan={8} className="text-center py-12 text-gray-400">
                             <Search className="w-8 h-8 mx-auto mb-2 opacity-30" />
                             لا توجد نتائج
                           </td>
@@ -670,12 +788,28 @@ export function Items() {
                                 </div>
                               </td>
                               <td className="px-4 py-3">
+                                {it.defaultNaulage != null ? (
+                                  <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full font-mono">
+                                    <DollarSign className="w-3 h-3" />{it.defaultNaulage} / {it.defaultNaulageUnit}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-300 text-xs">—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
                                 <span className={cn("px-2 py-0.5 rounded-full text-xs", it.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500")}>
                                   {it.status === "active" ? "نشط" : "غير نشط"}
                                 </span>
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
+                                  <button
+                                    className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                    onClick={() => openPrices(it)}
+                                  >
+                                    <DollarSign className="w-5 h-5" />
+                                    <span className="text-[10px] font-medium whitespace-nowrap">أسعار</span>
+                                  </button>
                                   <button
                                     className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
                                     onClick={() => openBrands(it)}
@@ -887,13 +1021,25 @@ export function Items() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>فترة التخزين (يوم)</Label>
-                <Input type="number" placeholder="0" value={newItem.maxDays} onChange={e => setNewItem({ ...newItem, maxDays: e.target.value })}
+                <Label className="flex items-center gap-1"><Wind className="w-3 h-3 text-amber-500" />مدة التنشير (يوم)</Label>
+                <Input type="number" placeholder="0" value={newItem.airingDays} onChange={e => setNewItem({ ...newItem, airingDays: e.target.value })}
                   dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
               </div>
               <div className="space-y-1.5">
+                <Label>مدة التخزين (يوم)</Label>
+                <Input type="number" placeholder="0" value={newItem.maxDays} onChange={e => setNewItem({ ...newItem, maxDays: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
                 <Label className="flex items-center gap-1"><Bell className="w-3 h-3 text-orange-500" />تنبيه بعد (يوم)</Label>
                 <Input type="number" placeholder="0" value={newItem.alertDays} onChange={e => setNewItem({ ...newItem, alertDays: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Bell className="w-3 h-3 text-green-600" />مدة الصلاحية (يوم)</Label>
+                <Input type="number" placeholder="365" value={newItem.expiryDays} onChange={e => setNewItem({ ...newItem, expiryDays: e.target.value })}
                   dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
               </div>
             </div>
@@ -921,6 +1067,23 @@ export function Items() {
                 نطاق درجة الحرارة المقبول: <strong>{newItem.tempMin || "—"}°م</strong> إلى <strong>{newItem.tempMax || "—"}°م</strong>
               </p>
             )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><DollarSign className="w-3 h-3 text-green-600" />النولون الافتراضي</Label>
+                <Input type="number" placeholder="0.00" value={newItem.defaultNaulage}
+                  onChange={e => setNewItem({ ...newItem, defaultNaulage: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] font-mono" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>وحدة النولون</Label>
+                <Select onValueChange={v => setNewItem({ ...newItem, defaultNaulageUnit: v })}>
+                  <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الوحدة" /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {["طرد", "شوال", "كرتونة", "صندوق", "برميل", "كيلو", "طن"].map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
             <Button onClick={handleSaveItem} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ</Button>
@@ -968,15 +1131,29 @@ export function Items() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>فترة التخزين (يوم)</Label>
+                <Label className="flex items-center gap-1"><Wind className="w-3 h-3 text-amber-500" />مدة التنشير (يوم)</Label>
+                <Input type="number" value={editItemForm.airingDays}
+                  onChange={e => setEditItemForm({ ...editItemForm, airingDays: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>مدة التخزين (يوم)</Label>
                 <Input type="number" value={editItemForm.maxDays}
                   onChange={e => setEditItemForm({ ...editItemForm, maxDays: e.target.value })}
                   dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1"><Bell className="w-3 h-3 text-orange-500" />تنبيه بعد (يوم)</Label>
                 <Input type="number" value={editItemForm.alertDays}
                   onChange={e => setEditItemForm({ ...editItemForm, alertDays: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><Bell className="w-3 h-3 text-green-600" />مدة الصلاحية (يوم)</Label>
+                <Input type="number" value={editItemForm.expiryDays}
+                  onChange={e => setEditItemForm({ ...editItemForm, expiryDays: e.target.value })}
                   dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
               </div>
             </div>
@@ -1006,6 +1183,23 @@ export function Items() {
                 نطاق درجة الحرارة المقبول: <strong>{editItemForm.tempMin || "—"}°م</strong> إلى <strong>{editItemForm.tempMax || "—"}°م</strong>
               </p>
             )}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1"><DollarSign className="w-3 h-3 text-green-600" />النولون الافتراضي</Label>
+                <Input type="number" placeholder="0.00" value={editItemForm.defaultNaulage}
+                  onChange={e => setEditItemForm({ ...editItemForm, defaultNaulage: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] font-mono" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>وحدة النولون</Label>
+                <Select value={editItemForm.defaultNaulageUnit} onValueChange={v => setEditItemForm({ ...editItemForm, defaultNaulageUnit: v })}>
+                  <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الوحدة" /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {["طرد", "شوال", "كرتونة", "صندوق", "برميل", "كيلو", "طن"].map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
           <DialogFooter className="gap-2 justify-end mt-2">
             <Button onClick={handleSaveEditItem} className="bg-[#155dfc] hover:bg-blue-700 text-white">حفظ التعديلات</Button>
@@ -1253,6 +1447,170 @@ export function Items() {
           <DialogFooter className="gap-2 justify-end mt-2">
             <Button onClick={handleSaveEditBrand} className="bg-violet-600 hover:bg-violet-700 text-white">حفظ التعديلات</Button>
             <Button variant="outline" onClick={() => setEditingBrand(null)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════ PRICE LIST DIALOG ══════════════════ */}
+      <Dialog open={!!priceItem} onOpenChange={open => { if (!open) setPriceItem(null); }}>
+        <DialogContent dir="rtl" className="max-w-2xl bg-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-green-600" />
+              قائمة الأسعار: {priceItem?.name}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex items-center justify-end">
+            <Button
+              size="sm"
+              className="bg-green-600 hover:bg-green-700 text-white gap-1 h-8"
+              onClick={() => { setNewPrice({ listName: "Default", price: "", unit: "", notes: "" }); setShowAddPrice(true); }}
+            >
+              <Plus className="w-3.5 h-3.5" />إضافة سعر
+            </Button>
+          </div>
+
+          <div className="border rounded-xl overflow-hidden">
+            {pricesLoading ? (
+              <div className="flex items-center justify-center py-10 text-gray-400">
+                <Loader2 className="w-5 h-5 animate-spin ml-2" />جاري التحميل...
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">#</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">القائمة</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">السعر</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">الوحدة</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">ملاحظات</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prices.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center py-10 text-gray-400">
+                        <DollarSign className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                        <p>لا توجد أسعار مضافة بعد</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    prices.map((p, idx) => (
+                      <tr key={p.id} className={cn("border-b last:border-0 hover:bg-green-50/20 transition-colors", idx % 2 === 0 ? "bg-white" : "bg-gray-50/30")}>
+                        <td className="px-4 py-2.5 text-gray-400 text-xs">{idx + 1}</td>
+                        <td className="px-4 py-2.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700 font-medium">{p.listName}</span>
+                        </td>
+                        <td className="px-4 py-2.5 font-semibold text-gray-800 font-mono">{p.price.toLocaleString("ar-EG")}</td>
+                        <td className="px-4 py-2.5">
+                          <span className="font-mono text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">{p.unit}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-500 text-xs">{p.notes || "—"}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" onClick={() => openEditPrice(p)}>
+                              <Edit className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">تعديل</span>
+                            </button>
+                            <button className="flex flex-col items-center gap-0.5 px-2 py-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" onClick={() => confirmDelete(`${p.price} ${p.unit}`, () => { void handleDeletePrice(p); })}>
+                              <Trash2 className="w-5 h-5" />
+                              <span className="text-[10px] font-medium whitespace-nowrap">حذف</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <DialogFooter className="mt-1">
+            <Button variant="outline" onClick={() => setPriceItem(null)}>إغلاق</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════ ADD PRICE DIALOG ══════════════════ */}
+      <Dialog open={showAddPrice} onOpenChange={setShowAddPrice}>
+        <DialogContent dir="rtl" className="max-w-md bg-white">
+          <DialogHeader><DialogTitle>إضافة سعر جديد</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label>اسم القائمة</Label>
+              <Input value={newPrice.listName} onChange={e => setNewPrice({ ...newPrice, listName: e.target.value })}
+                dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>السعر <span className="text-red-500">*</span></Label>
+                <Input type="number" placeholder="0.00" value={newPrice.price}
+                  onChange={e => setNewPrice({ ...newPrice, price: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] font-mono" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>الوحدة <span className="text-red-500">*</span></Label>
+                <Select onValueChange={v => setNewPrice({ ...newPrice, unit: v })}>
+                  <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue placeholder="اختر الوحدة" /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {["كجم", "طن", "شوال", "كرتونة", "صندوق", "برميل", "طرد", "قطعة"].map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Input placeholder="ملاحظات اختيارية..." value={newPrice.notes}
+                onChange={e => setNewPrice({ ...newPrice, notes: e.target.value })}
+                dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveNewPrice} className="bg-green-600 hover:bg-green-700 text-white">حفظ</Button>
+            <Button variant="outline" onClick={() => setShowAddPrice(false)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══════════════════ EDIT PRICE DIALOG ══════════════════ */}
+      <Dialog open={!!editingPrice} onOpenChange={open => { if (!open) setEditingPrice(null); }}>
+        <DialogContent dir="rtl" className="max-w-md bg-white">
+          <DialogHeader><DialogTitle>تعديل السعر</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label>اسم القائمة</Label>
+              <Input value={editPriceForm.listName} onChange={e => setEditPriceForm({ ...editPriceForm, listName: e.target.value })}
+                dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>السعر <span className="text-red-500">*</span></Label>
+                <Input type="number" value={editPriceForm.price}
+                  onChange={e => setEditPriceForm({ ...editPriceForm, price: e.target.value })}
+                  dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb] font-mono" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>الوحدة <span className="text-red-500">*</span></Label>
+                <Select value={editPriceForm.unit} onValueChange={v => setEditPriceForm({ ...editPriceForm, unit: v })}>
+                  <SelectTrigger dir="rtl" className="border border-[#d1d5dc] bg-white"><SelectValue /></SelectTrigger>
+                  <SelectContent dir="rtl">
+                    {["كجم", "طن", "شوال", "كرتونة", "صندوق", "برميل", "طرد", "قطعة"].map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>ملاحظات</Label>
+              <Input value={editPriceForm.notes} onChange={e => setEditPriceForm({ ...editPriceForm, notes: e.target.value })}
+                dir="rtl" className="border border-[#d1d5dc] bg-[#f9fafb]" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 justify-end mt-2">
+            <Button onClick={handleSaveEditPrice} className="bg-green-600 hover:bg-green-700 text-white">حفظ التعديلات</Button>
+            <Button variant="outline" onClick={() => setEditingPrice(null)}>إلغاء</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

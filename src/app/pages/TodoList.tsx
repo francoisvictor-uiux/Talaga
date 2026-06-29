@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSessionFilter } from "../hooks/useSessionFilter";
 import { motion, AnimatePresence } from "motion/react";
 import { Plus, CheckSquare, Circle, Clock, User, Search, X, Trash2 } from "lucide-react";
 import { PageHeader } from "../components/layout/PageHeader";
@@ -35,9 +36,9 @@ export function TodoList() {
   const [tasks, setTasks] = useState<BackendTask[]>([]);
   const [employees, setEmployees] = useState<BackendEmployee[]>([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [filter, setFilter] = useState<"all" | "pending" | "completed">("all");
-  const [search, setSearch] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState<"all" | "عالية" | "متوسطة" | "منخفضة">("all");
+  const [filter, setFilter, resetFilter] = useSessionFilter<"all" | "pending" | "completed">("todo_filter", "all");
+  const [search, setSearch, resetSearch] = useSessionFilter("todo_search", "");
+  const [priorityFilter, setPriorityFilter, resetPriority] = useSessionFilter<"all" | "عالية" | "متوسطة" | "منخفضة">("todo_priority", "all");
   const [newTask, setNewTask] = useState({ title: "", taskType: "مهمة", priority: "متوسطة", dueDate: "", assigneeEmployeeId: "", assigneeName: "" });
   const [saving, setSaving] = useState(false);
 
@@ -153,6 +154,9 @@ export function TodoList() {
               </button>
             ))}
           </div>
+          {(search || filter !== "all" || priorityFilter !== "all") && (
+            <Button size="sm" variant="outline" onClick={() => { resetSearch(); resetFilter(); resetPriority(); }}>إعادة تعيين</Button>
+          )}
         </div>
       </motion.div>
 
